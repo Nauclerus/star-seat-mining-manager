@@ -172,7 +172,12 @@
                     {{-- General Settings Tab --}}
                     <div id="general-settings" class="settings-section active">
                         @include('mining-manager::settings.tabs.general', [
-                            'settings' => (object)$settings['general'],
+                            // The form is keyed by field name; the getter returns
+                            // setting names, so map the payment pair across.
+                            'settings' => (object) array_merge($settings['general'], [
+                                'payment_match_tolerance' => $settings['payment']['match_tolerance'] ?? null,
+                                'payment_grace_period_hours' => $settings['payment']['grace_period_hours'] ?? null,
+                            ]),
                             'corporations' => $corporations,
                             'selectedCorporationId' => $corporationId ?? null
                         ])
@@ -211,6 +216,20 @@
                                 $taxSelectorMapped,
                                 $settings['exemptions']
                             );
+
+                            // The forms are keyed by field name while the getters
+                            // publish setting names, so map the mismatched ones
+                            // across. Without this the fields fall back to their
+                            // defaults, and saving writes those defaults back.
+                            $taxSettings['ore_tax'] = $taxSettings['ore'] ?? null;
+                            $taxSettings['ice_tax'] = $taxSettings['ice'] ?? null;
+                            $taxSettings['gas_tax'] = $taxSettings['gas'] ?? null;
+                            $taxSettings['abyssal_ore_tax'] = $taxSettings['abyssal_ore'] ?? null;
+                            $taxSettings['triglavian_ore_tax'] = $taxSettings['triglavian_ore'] ?? null;
+                            $taxSettings['exemption_enabled'] = $taxSettings['enabled'] ?? false;
+                            $taxSettings['exemption_threshold'] = $taxSettings['threshold'] ?? null;
+                            $taxSettings['minimum_tax_amount'] = $settings['payment']['minimum_tax_amount'] ?? null;
+                            $taxSettings['minimum_tax_behavior'] = $settings['payment']['minimum_tax_behavior'] ?? 'exempt';
                         @endphp
                         @include('mining-manager::settings.tabs.tax_rates', [
                             'settings' => (object)$taxSettings,
