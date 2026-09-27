@@ -1031,10 +1031,20 @@ class SettingsManagerService
      */
     public function getPricingSettings(): array
     {
+        $provider = $this->getSetting('price_provider', config('mining-manager.general.price_provider', 'seat'));
+
+        // When Manager Core is the provider it owns the price_type too, via
+        // its per-plugin preference. Honor it so MM values on the same side
+        // MC serves for the mining-manager row instead of a local copy that
+        // can drift from MC's Pricing Preferences page.
+        $priceType = $provider === 'manager-core'
+            ? $this->resolveMcPriceType()
+            : $this->getSetting('pricing.price_type', 'sell');
+
         return [
             // Price provider (checks settings first, falls back to ENV)
-            'price_provider' => $this->getSetting('price_provider', config('mining-manager.general.price_provider', 'seat')),
-            'price_type' => $this->getSetting('pricing.price_type', 'sell'),
+            'price_provider' => $provider,
+            'price_type' => $priceType,
             'cache_duration' => $this->getSetting('pricing.cache_duration', 240),
             'fallback_to_jita' => $this->getSetting('pricing.fallback_to_jita', true),
 
@@ -1065,12 +1075,7 @@ class SettingsManagerService
             // unused — this method is the only reader and it now consults
             // MC's pref first.
             //
-            // manager_core_variant: hardcoded to 'min' because that's the
-            // only variant that produces meaningful tax + payout values
-            // (lowest sell = real buy price). Operator-selectable variant
-            // was removed from MM's UI in commit 583ea48.
             'manager_core_market' => $this->resolveMcMarket(),
-            'manager_core_variant' => 'min',
 
             // Refining settings
             'use_refined_value' => $this->getSetting('pricing.use_refined_value', config('mining-manager.pricing.use_refined_value', true)),
@@ -1101,28 +1106,61 @@ class SettingsManagerService
      */
     protected function resolveMcMarket(): string
     {
-        // Static cache for the request — avoids N bridge calls per page
-        static $cached = null;
-        if ($cached !== null) {
+        $pref = $this->resolveMcPreference();
+
+        return is_array($pref) && !empty($pref['market'])
+            ? (string) $pref['market']
+            : 'jita';
+    }
+
+    /**
+     * Resolve MM's effective price_type from MC's per-plugin preference,
+     * mapping MC's 'avg' onto MM's 'average'. Falls back to MM's stored
+     * pricing.price_type when MC has no preference row.
+     */
+    protected function resolveMcPriceType(): string
+    {
+        $pref = $this->resolveMcPreference();
+        $priceType = is_array($pref) ? ($pref['price_type'] ?? null) : null;
+
+        return match ($priceType) {
+            'sell', 'buy' => $priceType,
+            'avg' => 'average',
+            default => $this->getSetting('pricing.price_type', 'sell'),
+        };
+    }
+
+    /**
+     * Memoised MC pricing preference for the mining-manager plugin — at
+     * most one bridge call per request, shared by resolveMcMarket() and
+     * resolveMcPriceType(). Null when MC is older than the capability,
+     * the bridge fails, or no preference row exists yet.
+     *
+     * @return array|null
+     */
+    protected function resolveMcPreference(): ?array
+    {
+        static $cached = false;
+
+        if ($cached !== false) {
             return $cached;
         }
 
-        $market = 'jita';
+        $cached = null;
 
         try {
             if (class_exists('ManagerCore\\Services\\PluginBridge')) {
                 $bridge = app(\ManagerCore\Services\PluginBridge::class);
                 $pref = $bridge->call('ManagerCore', 'pricing.getPreferenceForPlugin', 'mining-manager');
-                if (is_array($pref) && !empty($pref['market'])) {
-                    $market = (string) $pref['market'];
+                if (is_array($pref)) {
+                    $cached = $pref;
                 }
             }
         } catch (\Throwable $e) {
-            // Bridge call failed — keep the 'jita' literal. No log spam;
-            // this is expected on older MC versions without the capability.
+            // Bridge call failed — no pref. Expected on older MC versions
+            // without the capability; callers fall back to defaults.
         }
 
-        $cached = $market;
         return $cached;
     }
 

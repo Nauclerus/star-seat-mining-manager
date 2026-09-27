@@ -427,7 +427,7 @@ class MasterTestRunner
         $expected = [
             'price_provider', 'price_type', 'cache_duration', 'fallback_to_jita',
             'janice_market', 'janice_price_method',
-            'manager_core_market', 'manager_core_variant',
+            'manager_core_market',
             'use_refined_value', 'refining_efficiency',
         ];
 
@@ -450,7 +450,7 @@ class MasterTestRunner
         return $this->pass(
             'Pricing settings loadable',
             'settings',
-            "provider={$s['price_provider']}, MC market={$s['manager_core_market']}, variant={$s['manager_core_variant']}"
+            "provider={$s['price_provider']}, price_type={$s['price_type']}, MC market={$s['manager_core_market']}"
         );
     }
 

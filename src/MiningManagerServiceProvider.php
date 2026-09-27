@@ -673,7 +673,12 @@ class MiningManagerServiceProvider extends AbstractSeatPlugin
             // silently switch to 'sell'.
             try {
                 if (class_exists(\ManagerCore\Services\PluginBridge::class)) {
-                    $priceType = $pricingSettings['price_type'] ?? 'sell';
+                    // MC's vocabulary is sell|buy|avg; MM's is
+                    // sell|buy|average. Map before seeding so MC doesn't
+                    // get an unrecognised 'average'.
+                    $priceType = ($pricingSettings['price_type'] ?? 'sell') === 'average'
+                        ? 'avg'
+                        : ($pricingSettings['price_type'] ?? 'sell');
                     $bridge = $this->app->make(\ManagerCore\Services\PluginBridge::class);
                     $bridge->call(
                         'ManagerCore',

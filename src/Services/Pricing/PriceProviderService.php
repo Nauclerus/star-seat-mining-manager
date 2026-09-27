@@ -496,10 +496,9 @@ class PriceProviderService
         $pricingSettings = $this->settingsService->getPricingSettings();
         $priceType = $pricingSettings['price_type'] ?? 'sell';
         $market = $pricingSettings['manager_core_market'] ?? 'jita';
-        $variant = $pricingSettings['manager_core_variant'] ?? 'min';
 
-        // For "average" we need both sides (we average buy.<variant> and
-        // sell.<variant> per type). MC's getPrice priceType='both' returns
+        // For "average" we need both sides (we average sell.min and
+        // buy.max per type). MC's getPrice priceType='both' returns
         // both at once in a single shot, so we ask for it here and combine
         // in PHP rather than making 2× the calls.
         $bridgePriceType = $priceType === 'average' ? 'both' : $priceType;
@@ -576,8 +575,8 @@ class PriceProviderService
                 $sellStats = $hasBuySell ? ($entry['sell'] ?? null) : null;
                 $buyStats  = $hasBuySell ? ($entry['buy']  ?? null) : null;
 
-                $sellValue = $sellStats ? $this->extractVariant($sellStats, $variant) : 0;
-                $buyValue  = $buyStats  ? $this->extractVariant($buyStats,  $variant) : 0;
+                $sellValue = $sellStats ? $this->reduceMcStats($sellStats, 'sell') : 0;
+                $buyValue  = $buyStats  ? $this->reduceMcStats($buyStats,  'buy') : 0;
 
                 if ($sellStats && $buyStats) {
                     $prices[$typeId] = ($sellValue + $buyValue) / 2;
@@ -601,7 +600,7 @@ class PriceProviderService
             } else {
                 // priceType is 'buy' or 'sell' — entry is the inner stats shape.
                 $stats = $hasBuySell ? ($entry[$priceType] ?? null) : $entry;
-                $prices[$typeId] = $stats ? $this->extractVariant($stats, $variant) : 0;
+                $prices[$typeId] = $stats ? $this->reduceMcStats($stats, $priceType) : 0;
 
                 if ($stats && $this->isStatsStale($stats, $stalenessThreshold)) {
                     $staleCount++;
@@ -662,22 +661,19 @@ class PriceProviderService
     }
 
     /**
-     * Pull the configured variant (min/max/avg/median/percentile) value out of
-     * an MC price-stats array. Single source of truth so both sides of the
-     * 'average' merge path use the same selector.
+     * Reduce an MC price-stats array to the actionable price for one side,
+     * matching MC's documented reduction: 'sell' → sell.min (cheapest sell
+     * order, what you'd pay to buy now), 'buy' → buy.max (highest buy
+     * order, what you'd get selling now).
      *
      * @param array  $stats  MC formatPriceStats output
-     * @param string $variant
+     * @param string $side   'buy' | 'sell'
      * @return float
      */
-    protected function extractVariant(array $stats, string $variant): float
+    protected function reduceMcStats(array $stats, string $side): float
     {
-        return match ($variant) {
-            'min' => (float) ($stats['min'] ?? 0),
-            'max' => (float) ($stats['max'] ?? 0),
-            'avg' => (float) ($stats['avg'] ?? 0),
-            'median' => (float) ($stats['median'] ?? 0),
-            'percentile' => (float) ($stats['percentile'] ?? 0),
+        return match ($side) {
+            'buy' => (float) ($stats['max'] ?? 0),
             default => (float) ($stats['min'] ?? 0),
         };
     }
@@ -943,7 +939,6 @@ class PriceProviderService
 
         $pricingSettings = $this->settingsService->getPricingSettings();
         $priceType = $pricingSettings['price_type'] ?? 'sell';
-        $variant = $pricingSettings['manager_core_variant'] ?? 'min';
 
         // The Jita-fallback path doesn't try to be clever about 'average'
         // — if the user picked 'average', we just use sell-side here. This
@@ -993,7 +988,7 @@ class PriceProviderService
             $hasBuySell = is_array($entry) && (array_key_exists('buy', $entry) || array_key_exists('sell', $entry));
             $stats = $hasBuySell ? ($entry[$bridgePriceType] ?? null) : $entry;
 
-            $prices[$typeId] = $stats ? $this->extractVariant($stats, $variant) : 0;
+            $prices[$typeId] = $stats ? $this->reduceMcStats($stats, $bridgePriceType) : 0;
         }
 
         return $prices;

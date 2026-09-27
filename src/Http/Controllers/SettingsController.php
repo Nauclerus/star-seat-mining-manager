@@ -904,7 +904,9 @@ class SettingsController extends Controller
                             'pricing.registerPreference',
                             'mining-manager',
                             $market,
-                            $data['price_type'] ?? 'sell',
+                            // MC uses sell|buy|avg; MM surfaces
+                            // sell|buy|average, so map before sending.
+                            ($data['price_type'] ?? 'sell') === 'average' ? 'avg' : ($data['price_type'] ?? 'sell'),
                             'Mining Manager — tax + payout calculations'
                         );
                     } catch (\Throwable $prefEx) {

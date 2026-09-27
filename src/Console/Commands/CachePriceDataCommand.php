@@ -130,16 +130,12 @@ class CachePriceDataCommand extends Command
      */
     private function syncFromManagerCore(array $typeIds, int $regionId): void
     {
-        // Both market and variant come from SettingsManagerService now —
-        // which resolves manager_core_market by calling MC's
-        // pricing.getPreferenceForPlugin bridge capability under the hood
-        // (see SettingsManagerService::resolveMcMarket). So the operator's
+        // Both market and price_type come from SettingsManagerService now —
+        // it resolves them from MC's per-plugin preference via the
+        // pricing.getPreferenceForPlugin bridge capability (see
+        // SettingsManagerService::resolveMcPreference). So the operator's
         // change in MC's Pricing Preferences UI propagates here
         // automatically without any direct bridge call in this command.
-        //
-        // variant=min is hardcoded by SettingsManagerService — the only
-        // variant that produces meaningful tax + payout values (lowest
-        // sell = real buy price for an instant market buy).
         //
         // Why not pricing.pricesForPlugin: that returns ONE value per
         // type (the configured price_type), but MM needs BOTH buy + sell
@@ -148,9 +144,8 @@ class CachePriceDataCommand extends Command
         // (full stats both sides) but pass it MC's market.
         $pricingSettings = $this->settingsService->getPricingSettings();
         $market = $pricingSettings['manager_core_market'];
-        $variant = $pricingSettings['manager_core_variant'];
 
-        $this->info("Syncing from Manager Core (market: {$market}, variant: {$variant})...");
+        $this->info("Syncing from Manager Core (market: {$market})...");
 
         // Goes through `pricing.getPrices` which returns the documented
         // `[typeId => ['buy' => stats, 'sell' => stats]]` shape regardless
@@ -227,8 +222,12 @@ class CachePriceDataCommand extends Command
             $sellStats = is_array($entry['sell'] ?? null) ? $entry['sell'] : null;
             $buyStats  = is_array($entry['buy']  ?? null) ? $entry['buy']  : null;
 
-            $sellPrice = $sellStats ? $this->extractMcVariant($sellStats, $variant) : 0;
-            $buyPrice  = $buyStats  ? $this->extractMcVariant($buyStats,  $variant) : 0;
+            // Store each side at its actionable price, matching MC's
+            // documented reduction: sell.min is what you pay to buy now,
+            // buy.max is what you get selling now. The valuation layer
+            // then reads whichever side MC's preference selects.
+            $sellPrice = $sellStats ? (float) ($sellStats['min'] ?? 0) : 0;
+            $buyPrice  = $buyStats  ? (float) ($buyStats['max'] ?? 0) : 0;
             $avgPrice = ($sellPrice + $buyPrice) / 2;
 
             if ($sellPrice > 0 || $buyPrice > 0) {
@@ -260,23 +259,6 @@ class CachePriceDataCommand extends Command
         if ($missing > 0) {
             $this->warn("Missing in Manager Core: {$missing} items");
         }
-    }
-
-    /**
-     * Pull the configured variant value out of an MC formatPriceStats
-     * array. Mirrors PriceProviderService::extractVariant so this command
-     * doesn't need to know about MC's storage column names.
-     */
-    private function extractMcVariant(array $stats, string $variant): float
-    {
-        return match ($variant) {
-            'min' => (float) ($stats['min'] ?? 0),
-            'max' => (float) ($stats['max'] ?? 0),
-            'avg' => (float) ($stats['avg'] ?? 0),
-            'median' => (float) ($stats['median'] ?? 0),
-            'percentile' => (float) ($stats['percentile'] ?? 0),
-            default => (float) ($stats['min'] ?? 0),
-        };
     }
 
     /**
