@@ -131,6 +131,7 @@ class SettingsController extends Controller
             'notifications' => $this->settingsService->getNotificationSettings(),
             'dashboard' => $this->settingsService->getDashboardSettings(),
             'features' => $this->settingsService->getFeatureFlags(),
+            'payment' => $this->settingsService->getPaymentSettings(),
         ];
 
         // Get available corporations from SeAT
