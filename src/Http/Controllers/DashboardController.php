@@ -134,6 +134,8 @@ class DashboardController extends Controller
             ];
         });
 
+        $dashboardData['taxBanner'] = $this->taxBanner($user);
+
         return view('mining-manager::dashboard.member', $dashboardData);
     }
 
@@ -214,6 +216,7 @@ class DashboardController extends Controller
         // Pass corporation tab AJAX URL to view
         $dashboardData['corpTabUrl'] = route('mining-manager.dashboard.tab.corporation');
         $dashboardData['guestTabUrl'] = route('mining-manager.dashboard.tab.guest-miners');
+        $dashboardData['taxBanner'] = $this->taxBanner(auth()->user());
 
         return view('mining-manager::dashboard.combined-director', $dashboardData);
     }
@@ -448,27 +451,10 @@ class DashboardController extends Controller
                 ->pluck('character_id')
                 ->toArray();
 
-            // Miners without an affiliation row are not returned by the query
-            // above. Resolve their current corporation using the local cache
-            // table (filled by the scheduled ResolveGuestAffiliationsCommand).
-            // This avoids live ESI calls on the request path — see PR #4.
-            $affiliatedIds = DB::table('character_affiliations')
-                ->whereIn('character_id', $allMinerIds)
-                ->pluck('character_id')
-                ->toArray();
-
-            $unresolvedIds = array_values(array_diff($allMinerIds, $affiliatedIds));
-
-            if (!empty($unresolvedIds)) {
-                $info = $this->affiliationResolver->resolveBatch($unresolvedIds);
-
-                foreach ($info as $charId => $data) {
-                    $corpId = $data['corporation_id'] ?? null;
-                    if ($corpId && !in_array((int) $corpId, $homeCorporationIds, true)) {
-                        $guestIds[] = $charId;
-                    }
-                }
-            }
+            // Miners SeAT has no affiliation for are not in the query above.
+            // The background lookup may have placed them in another
+            // corporation; this only reads what it stored.
+            $guestIds = array_merge($guestIds, $this->affiliationResolver->outsideHome($allMinerIds, $homeCorporationIds));
 
             return array_values(array_unique($guestIds));
         } catch (\Exception $e) {
@@ -1702,6 +1688,60 @@ class DashboardController extends Controller
      * FIXED: Get user's character IDs with multiple fallback methods
      * Addresses SeAT v5.x relationship issues
      */
+    /**
+     * What the person looking still owes in mining tax, for the banner at the top
+     * of the dashboard, or null when they owe nothing.
+     *
+     * Worked out on every load rather than inside the dashboard cache, so the
+     * banner goes as soon as a payment is matched instead of minutes later. Bills
+     * sit under the main character, the same lookup Tax Overview uses.
+     */
+    private function taxBanner($user): ?array
+    {
+        try {
+            if (!$user || !($this->settingsService->getFeatureFlags()['enable_tax_tracking'] ?? true)) {
+                return null;
+            }
+
+            $billingIds = $user->main_character_id
+                ? [(int) $user->main_character_id]
+                : $this->getUserCharacterIds($user);
+
+            if (empty($billingIds)) {
+                return null;
+            }
+
+            $bills = MiningTax::whereIn('character_id', $billingIds)
+                ->outstanding()
+                ->get()
+                ->filter(fn ($bill) => $bill->getRemainingBalance() > 0)
+                ->sortBy(fn ($bill) => $bill->effectiveDueDate()->getTimestamp())
+                ->values();
+
+            if ($bills->isEmpty()) {
+                return null;
+            }
+
+            return [
+                // The first to fall due sets the countdown; any late bill turns it red.
+                'first' => $bills->first(),
+                'late' => $bills->contains(fn ($bill) => $bill->isOverdue()),
+                'count' => $bills->count(),
+                'remaining' => round($bills->sum(fn ($bill) => $bill->getRemainingBalance()), 2),
+                'billed' => round($bills->sum(fn ($bill) => (float) $bill->amount_owed), 2),
+                'paid' => round($bills->sum(fn ($bill) => (float) $bill->amount_paid), 2),
+            ];
+        } catch (\Exception $e) {
+            // A missing banner is better than a dashboard that will not load.
+            \Log::warning('DashboardController: could not work out the tax banner', [
+                'user_id' => $user->id ?? null,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     private function getUserCharacterIds($user)
     {
         if (!$user) {
@@ -2014,27 +2054,9 @@ class DashboardController extends Controller
                     ->pluck('character_id')
                     ->toArray();
 
-                // Characters with no affiliation row are kept by default. If
-                // they resolve to a corporation outside the home set they are
-                // guests, not members, so exclude them too.
-                // Uses local cache (no live ESI on the request path — see PR #4).
-                $affiliatedIds = DB::table('character_affiliations')
-                    ->whereIn('character_id', $uniqueIds)
-                    ->pluck('character_id')
-                    ->toArray();
-
-                $unresolvedIds = array_values(array_diff($uniqueIds, $affiliatedIds));
-
-                if (!empty($unresolvedIds)) {
-                    $info = $this->affiliationResolver->resolveBatch($unresolvedIds);
-
-                    foreach ($info as $charId => $data) {
-                        $corpId = $data['corporation_id'] ?? null;
-                        if ($corpId && !in_array((int) $corpId, $homeCorporationIds, true)) {
-                            $nonCorpIds[] = $charId;
-                        }
-                    }
-                }
+                // Characters SeAT has no affiliation for stay in, unless the
+                // background lookup placed them in another corporation.
+                $nonCorpIds = array_merge($nonCorpIds, $this->affiliationResolver->outsideHome($uniqueIds, $homeCorporationIds));
 
                 if (!empty($nonCorpIds)) {
                     $uniqueIds = array_values(array_diff($uniqueIds, $nonCorpIds));

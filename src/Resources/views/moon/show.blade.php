@@ -179,6 +179,30 @@
                                     {{ trans('mining-manager::moons.' . $effectiveStatus) }}
                                 </span>
                             </p>
+
+                            @if(!empty($chunkBonuses))
+                            <p><strong>{{ trans('mining-manager::moons.moon_rigs') }}:</strong></p>
+                            <p class="ml-3 mb-3">
+                                @if($chunkBonuses['timer_rig'])
+                                    <i class="fas fa-cog text-info"></i> {{ $chunkBonuses['timer_rig'] }}<br>
+                                    <small class="text-muted">{{ trans('mining-manager::moons.rig_window', ['hours' => $chunkBonuses['window_hours']]) }}</small><br>
+                                @else
+                                    <span class="text-muted">{{ trans('mining-manager::moons.rig_no_timer', ['hours' => $chunkBonuses['window_hours']]) }}</span><br>
+                                @endif
+                                @if($chunkBonuses['yield'] === null)
+                                    <small class="text-muted">{{ trans('mining-manager::moons.rig_yield_unknown') }}</small>
+                                @elseif($chunkBonuses['yield'] > 0)
+                                    <i class="fas fa-plus-circle text-success"></i> {{ $chunkBonuses['yield_rig'] }}<br>
+                                    <small class="text-muted">{{ trans('mining-manager::moons.rig_yield_extra', [
+                                        'bonus' => rtrim(rtrim(number_format($chunkBonuses['yield'], 1), '0'), '.'),
+                                        'm3' => number_format($chunkBonuses['extra_m3'] ?? 0, 0),
+                                        'isk' => number_format($chunkBonuses['extra_value'] ?? 0, 0),
+                                    ]) }}</small>
+                                @else
+                                    <small class="text-muted">{{ trans('mining-manager::moons.rig_no_yield') }}</small>
+                                @endif
+                            </p>
+                            @endif
                         </div>
 
                         <div class="col-md-6">
@@ -219,19 +243,22 @@
                             </p>
                             @endif
 
-                            @php
-                                $autoFractureTime = $extraction->natural_decay_time
-                                    ? $extraction->natural_decay_time->copy()
-                                    : $extraction->chunk_arrival_time->copy()->addMinutes($extraction->getAutoFractureDelayMinutes());
-                            @endphp
                             <p><strong>{{ trans('mining-manager::moons.auto_fracture') }}:</strong></p>
                             <p class="ml-3 mb-3">
+                                @php
+                                    // EVE's own auto-fracture time already carries the rig.
+                                    $autoFractureMinutes = (int) round($extraction->getAutoFractureDelayMinutes());
+                                    $autoFractureTime = $extraction->natural_decay_time
+                                        ? $extraction->natural_decay_time->copy()
+                                        : $extraction->chunk_arrival_time->copy()->addMinutes($autoFractureMinutes);
+                                    $autoFractureAfter = intdiv($autoFractureMinutes, 60) . 'h' . ($autoFractureMinutes % 60 ? ' ' . ($autoFractureMinutes % 60) . 'm' : '');
+                                @endphp
                                 <span class="eve-time" data-eve-time="{{ $autoFractureTime->toIso8601String() }}" data-show-local>{{ $autoFractureTime->format('M d, Y H:i') }} EVE</span><br>
                                 <small class="text-muted">
                                     <span class="eve-countdown" data-target="{{ $autoFractureTime->toIso8601String() }}">
                                         {{ $autoFractureTime->diffForHumans() }}
                                     </span>
-                                    &mdash; chunk arrival + {{ round($extraction->getAutoFractureDelayMinutes() / 60, 2) }}h
+                                    &mdash; chunk arrival + {{ $autoFractureAfter }}
                                 </small>
                             </p>
 
@@ -367,6 +394,16 @@
                     </h3>
                 </div>
                 <div class="card-body">
+                    {{-- The scan is the first source for a moon's ore. Without one the
+                         chunk is built from the game's notices, so say so plainly. --}}
+                    @if(!($moonScanned ?? true))
+                        <div class="alert alert-warning mb-3">
+                            <i class="fas fa-satellite-dish"></i>
+                            <strong>{{ trans('mining-manager::moons.moon_not_scanned_title') }}</strong>
+                            {{ trans('mining-manager::moons.moon_not_scanned') }}
+                            <a href="{{ url('/tools/moons') }}" target="_blank" class="alert-link">{{ trans('mining-manager::moons.moon_not_scanned_link') }}</a>
+                        </div>
+                    @endif
                     @if($extraction->is_jackpot)
                         <div class="alert mb-3" style="background: rgba(255, 215, 0, 0.1); border-left: 4px solid #ffd700; color: #ffd700;">
                             <i class="fas fa-info-circle"></i>
@@ -495,6 +532,32 @@
                         </table>
                     </div>
 
+                    @if(!empty($volumeChecks))
+                    <div class="mt-3">
+                        <h6>{{ trans('mining-manager::moons.volume_checks') }}</h6>
+                        @php $firstTotal = $volumeChecks[0]['total_m3']; @endphp
+                        <ul class="list-unstyled small mb-1">
+                            @foreach($volumeChecks as $check)
+                                @php
+                                    $change = $firstTotal > 0 ? ($check['total_m3'] - $firstTotal) / $firstTotal * 100 : 0;
+                                    $changeText = abs($change) < 0.005
+                                        ? trans('mining-manager::moons.volume_check_same')
+                                        : trans('mining-manager::moons.volume_check_changed', ['change' => sprintf('%+.2f%%', $change)]);
+                                @endphp
+                                <li>
+                                    <strong>{{ $check['label'] }}</strong>,
+                                    <span class="eve-time" data-eve-time="{{ $check['at']->toIso8601String() }}">{{ $check['at']->format('M d, H:i') }} EVE</span>:
+                                    {{ number_format($check['total_m3'], 0) }} m³
+                                    @if(!$loop->first)
+                                        <span class="text-muted">({{ $changeText }})</span>
+                                    @endif
+                                </li>
+                            @endforeach
+                        </ul>
+                        <small class="text-muted">{{ trans('mining-manager::moons.volume_checks_help') }}</small>
+                    </div>
+                    @endif
+
                     {{-- Composition Visualization --}}
                     <div class="mt-4">
                         <h5>{{ trans('mining-manager::moons.composition_breakdown') }}</h5>
@@ -532,7 +595,7 @@
                         <i class="fas fa-hashtag"></i> <strong>Moon ID:</strong> {{ $extraction->moon_id ?? 'N/A' }}
                     </p>
                     <p class="text-muted">
-                        Once this moon is scanned, the ore composition, percentages, and estimated value will appear here.
+                        The ore composition and estimated value appear here once the moon is scanned, or once the game's first notice about this extraction comes in.
                     </p>
                 </div>
             </div>

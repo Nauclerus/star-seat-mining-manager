@@ -3,11 +3,8 @@
 namespace MiningManager\Console\Commands;
 
 use Illuminate\Console\Command;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Cache;
-use MiningManager\Models\MoonExtraction;
 use MiningManager\Services\Moon\MoonExtractionService;
-use MiningManager\Services\Moon\StructureMoonRigs;
 use Seat\Eveapi\Models\Corporation\CorporationStructure;
 use Carbon\Carbon;
 
@@ -115,78 +112,18 @@ class UpdateMoonExtractionsCommand extends Command
             try {
                 $this->line("Processing structure: {$structure->name}");
 
-                // The structure's moon-rig bonuses apply to every extraction
-                // it pulls up: belt lifetime and auto-fracture delay.
-                $rigs = StructureMoonRigs::forStructure((int) $structure->structure_id);
+                // The same import the Refresh button runs, so the two can never
+                // drift apart again.
+                $result = $this->extractionService->updateStructureExtractions($structure);
 
-                // Fetch extraction data from ESI via service
-                $extractionData = $this->extractionService->fetchExtractionData($structure->structure_id);
-
-                if (empty($extractionData)) {
+                if ($result['updated'] === 0 && $result['created'] === 0) {
                     $this->line("  No active extractions");
                     continue;
                 }
 
-                foreach ($extractionData as $extraction) {
-                    // Stamp the rig-aware window so the status decision and the
-                    // persisted row agree with the rest of the plugin.
-                    $extraction['chunk_lifetime_hours'] = $rigs['lifetime_hours'];
-                    $extraction['auto_fracture_delay_minutes'] = $rigs['auto_fracture_minutes'];
-
-                    // Check if extraction already exists
-                    $existing = MoonExtraction::where('structure_id', $structure->structure_id)
-                        ->where('extraction_start_time', $extraction['extraction_start_time'])
-                        ->first();
-
-                    if ($existing) {
-                        // Update existing record
-                        $updates = [
-                            'chunk_arrival_time' => $extraction['chunk_arrival_time'],
-                            'natural_decay_time' => $extraction['natural_decay_time'],
-                            'status' => $this->extractionService->determineStatus($extraction, $existing),
-                            'moon_id' => $extraction['moon_id'] ?? null,
-                            'ore_composition' => $extraction['ore_composition'] ?? null,
-                            'updated_at' => Carbon::now(),
-                        ];
-
-                        // The in-game decay timer is fixed at fracture, so only
-                        // refresh the window while the chunk is still intact.
-                        if (!$existing->fractured_at) {
-                            $updates['chunk_lifetime_hours'] = $rigs['lifetime_hours'];
-                            $updates['auto_fracture_delay_minutes'] = $rigs['auto_fracture_minutes'];
-                        }
-
-                        $existing->update($updates);
-                        $this->line("  Updated extraction (chunk arrival: {$extraction['chunk_arrival_time']})");
-                        $updated++;
-                    } else {
-                        // Create new record - wrapped in try/catch for race condition
-                        // protection against the unique constraint on (structure_id, extraction_start_time)
-                        try {
-                            MoonExtraction::create([
-                                'structure_id' => $structure->structure_id,
-                                'corporation_id' => $structure->corporation_id,
-                                'moon_id' => $extraction['moon_id'] ?? null,
-                                'extraction_start_time' => $extraction['extraction_start_time'],
-                                'chunk_arrival_time' => $extraction['chunk_arrival_time'],
-                                'natural_decay_time' => $extraction['natural_decay_time'],
-                                'status' => $this->extractionService->determineStatus($extraction),
-                                'ore_composition' => $extraction['ore_composition'] ?? null,
-                                'chunk_lifetime_hours' => $rigs['lifetime_hours'],
-                                'auto_fracture_delay_minutes' => $rigs['auto_fracture_minutes'],
-                            ]);
-                            $this->line("  Created new extraction (chunk arrival: {$extraction['chunk_arrival_time']})");
-                            $created++;
-                        } catch (QueryException $e) {
-                            // Unique constraint violation - another process created it first
-                            if (str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() === '23000') {
-                                $this->line("  Skipped duplicate extraction (chunk arrival: {$extraction['chunk_arrival_time']})");
-                            } else {
-                                throw $e; // Re-throw non-duplicate errors
-                            }
-                        }
-                    }
-                }
+                $this->line("  Updated {$result['updated']}, created {$result['created']}");
+                $updated += $result['updated'];
+                $created += $result['created'];
 
             } catch (\Exception $e) {
                 $this->error("Error processing structure {$structure->name}: {$e->getMessage()}");
@@ -214,10 +151,85 @@ class UpdateMoonExtractionsCommand extends Command
                 if ($mismatches > 0) {
                     $this->warn("Fired {$mismatches} schedule-mismatch notification(s).");
                 }
+
+                $reminders = app(\MiningManager\Services\Moon\PlannerReminders::class);
+                $notifications = app(\MiningManager\Services\Notification\NotificationService::class);
+                $plannerUrl = rtrim(config('app.url', ''), '/') . '/mining-manager/moon/planner';
+
+                // One message per idle refinery: each is its own job for somebody.
+                $idle = $reminders->notRescheduled($moonOwnerCorpId);
+                foreach ($idle as $refinery) {
+                    try {
+                        $notifications->sendMoonNotRescheduled($refinery + ['planner_url' => $plannerUrl]);
+                    } catch (\Throwable $e) {
+                        $this->error("Moon Not Rescheduled failed for structure {$refinery['structure_id']}: {$e->getMessage()}");
+                    }
+                }
+                if ($idle) {
+                    $this->warn('Sent ' . count($idle) . ' Moon Not Rescheduled reminder(s).');
+                }
+
+                // One message for every refinery short of planned pulls. Only
+                // marked as sent when the send went through, so a failure is
+                // tried again on the next run rather than a day later.
+                $planning = $reminders->needsPlanning($moonOwnerCorpId);
+                if ($planning) {
+                    try {
+                        $notifications->sendScheduleNeedsFilling($planning + ['planner_url' => $plannerUrl]);
+                        $reminders->markNeedsPlanningSent();
+                        $this->warn("Sent Moons Need Planning for {$planning['total']} refinery(ies).");
+                    } catch (\Throwable $e) {
+                        $this->error("Moons Need Planning failed: {$e->getMessage()}");
+                    }
+                }
             }
         } catch (\Exception $e) {
             // Planner reconciliation must never break the extraction import.
             $this->error("Planner reconciliation failed: {$e->getMessage()}");
+        }
+
+        // Moons we drill with no scan in SeAT are valued from the game's notices
+        // instead, and the simulator cannot see them. Say so once per new
+        // reason, and daily as well if that is switched on.
+        try {
+            $moonOwnerCorpId = $settingsService->getTaxProgramCorporationId();
+            if ($moonOwnerCorpId !== null) {
+                $listed = app(\MiningManager\Services\Moon\MoonScanWatch::class)->run((int) $moonOwnerCorpId);
+                if ($listed > 0) {
+                    $this->warn("Sent Moon Scan Missing for {$listed} moon(s).");
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->error("Moon scan watch failed: {$e->getMessage()}");
+        }
+
+        // Pulls planned on a refinery we no longer own cannot happen, so they
+        // come off the calendar, but only once it has been missing on three
+        // sightings twelve hours apart. A structure can drop out of SeAT for an
+        // afternoon. Blueprint slots stay until a person clears them.
+        try {
+            $gone = app(\MiningManager\Services\Moon\MissingRefineryWatch::class)->run();
+
+            if ($gone) {
+                $notifications = app(\MiningManager\Services\Notification\NotificationService::class);
+                $plannerUrl = rtrim(config('app.url', ''), '/') . '/mining-manager/moon/planner';
+
+                // One message per refinery, never grouped: losing a lot of them
+                // at once is exactly when a combined message would be too big
+                // for Discord and never arrive.
+                foreach ($gone as $refinery) {
+                    try {
+                        $notifications->sendRefineryGone($refinery + ['planner_url' => $plannerUrl]);
+                    } catch (\Throwable $e) {
+                        $this->error("Refinery Gone notification failed for structure {$refinery['structure_id']}: {$e->getMessage()}");
+                    }
+                }
+
+                $pulls = array_sum(array_column($gone, 'pulls_removed'));
+                $this->warn("Removed {$pulls} planned pull(s) on " . count($gone) . " refinery(ies) that are gone.");
+            }
+        } catch (\Exception $e) {
+            $this->error("Missing refinery watch failed: {$e->getMessage()}");
         }
 
         // A moon marked as somebody else's, or one somebody was waiting for,
@@ -248,4 +260,6 @@ class UpdateMoonExtractionsCommand extends Command
 
         return Command::SUCCESS;
     }
+
+
 }

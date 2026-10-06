@@ -7,6 +7,7 @@ use Seat\Web\Http\Controllers\Controller;
 use MiningManager\Models\MoonExtraction;
 use MiningManager\Models\MoonExtractionPlan;
 use MiningManager\Services\Moon\MoonPlannerService;
+use MiningManager\Services\Moon\RefineryService;
 use MiningManager\Services\Configuration\SettingsManagerService;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -27,12 +28,20 @@ use Illuminate\Support\Facades\DB;
 class MoonPlannerController extends Controller
 {
     protected MoonPlannerService $planner;
+    protected \MiningManager\Services\Moon\MoonRotationService $rotations;
     protected SettingsManagerService $settings;
+    protected RefineryService $refineries;
 
-    public function __construct(MoonPlannerService $planner, SettingsManagerService $settings)
-    {
+    public function __construct(
+        MoonPlannerService $planner,
+        SettingsManagerService $settings,
+        \MiningManager\Services\Moon\MoonRotationService $rotations,
+        RefineryService $refineries
+    ) {
         $this->planner = $planner;
         $this->settings = $settings;
+        $this->rotations = $rotations;
+        $this->refineries = $refineries;
 
         // moon_manager OR director (admin bypasses both via can()).
         $this->middleware(function ($request, $next) {
@@ -83,6 +92,8 @@ class MoonPlannerController extends Controller
         $calendar = [];
         $warnings = [];
         $refinerySummaries = [];
+        $blueprintList = [];
+        $refineryFlags = [];
         $minGapHours = $this->planner->getMinGapHours();
 
         if ($corporationId) {
@@ -94,6 +105,16 @@ class MoonPlannerController extends Controller
             $calendar = $built['calendar'];
             $warnings = $built['warnings'];
             $refinerySummaries = $this->buildRefinerySummaries($corporationId);
+            $blueprintList = $this->rotations->listForCorporation($corporationId);
+
+            // Gone, being unanchored, or no drill: marked on the cards and the
+            // pulls rather than hidden. Only a gone refinery's pulls are ever
+            // taken off, and only once the Refinery Gone check is sure.
+            $onPage = array_column($refinerySummaries, 'structure_id');
+            foreach ($calendar as $entries) {
+                $onPage = array_merge($onPage, array_column($entries, 'structure_id'));
+            }
+            $refineryFlags = $this->refineries->refineryFlags($corporationId, $onPage);
         }
 
         return view('mining-manager::moon.planner', [
@@ -102,6 +123,8 @@ class MoonPlannerController extends Controller
             'calendar' => $calendar,
             'warnings' => $warnings,
             'refinerySummaries' => $refinerySummaries,
+            'blueprintList' => $blueprintList,
+            'refineryFlags' => $refineryFlags,
             'minGapHours' => $minGapHours,
             'corporationId' => $corporationId,
         ]);
@@ -328,7 +351,7 @@ class MoonPlannerController extends Controller
         // plan for a structure this corp does not own that renders as
         // "Structure 12345" on the calendar forever. Checking it against the
         // corp's refineries also hands us the resolved moon.
-        $refinery = $this->planner->refineriesForCorporation($corporationId)
+        $refinery = $this->refineries->refineriesForCorporation($corporationId)
             ->firstWhere('structure_id', $structureId);
 
         if (!$refinery) {
@@ -442,7 +465,7 @@ class MoonPlannerController extends Controller
             'source' => MoonExtractionPlan::SOURCE_MANUAL,
             // Self-heal: a plan made for a refinery with no extraction history
             // has no moon yet. Once one turns up, take it.
-            'moon_id' => $plan->moon_id ?? $this->planner->resolveMoonId((int) $plan->structure_id),
+            'moon_id' => $plan->moon_id ?? $this->refineries->resolveMoonId((int) $plan->structure_id),
         ]);
 
         // Only log an actual time change as a "move".
@@ -462,13 +485,27 @@ class MoonPlannerController extends Controller
             ]);
         }
 
-        return response()->json(['success' => true]);
+        // Carry the same move to this moon's later pulls in the rotation, when
+        // that is what was asked for. By the same amount, so the pattern keeps
+        // its spacing instead of collapsing onto one time.
+        $carried = 0;
+        if ($request->boolean('cascade') && $plan->rotation_id && $oldArrival->ne($plannedAt)) {
+            [$actorId, $actorName] = $this->actor();
+            $carried = $this->rotations->shiftLater(
+                $plan,
+                (int) round($oldArrival->diffInMinutes($plannedAt, false)),
+                $actorId,
+                $actorName
+            );
+        }
+
+        return response()->json(['success' => true, 'carried' => $carried]);
     }
 
     /**
      * Remove a planned pull.
      */
-    public function destroy($id)
+    public function destroy(Request $request, $id)
     {
         $corporationId = $this->plannerCorporationId();
         $plan = MoonExtractionPlan::where('id', $id)
@@ -480,6 +517,13 @@ class MoonPlannerController extends Controller
         }
 
         [$actorId, $actorName] = $this->actor();
+
+        // Done before this one goes: finding the later pulls needs its time.
+        $carried = 0;
+        if ($request->boolean('cascade') && $plan->rotation_id) {
+            $carried = $this->rotations->deleteLater($plan, $actorId, $actorName);
+        }
+
         \MiningManager\Models\MoonExtractionPlanAudit::record([
             'corporation_id' => $corporationId,
             'plan_id' => $plan->id,
@@ -494,7 +538,7 @@ class MoonPlannerController extends Controller
 
         $plan->delete();
 
-        return response()->json(['success' => true]);
+        return response()->json(['success' => true, 'carried' => $carried]);
     }
 
     /**
@@ -636,6 +680,13 @@ class MoonPlannerController extends Controller
                 'status' => $plan->status,
                 'cadence_days' => $plan->cadence_days,
                 'notes' => $plan->notes,
+                // What an edit here could carry to: the same moon's later
+                // pulls in the same blueprint. The page only offers the choice
+                // when there is something to carry it to.
+                'rotation_id' => $plan->rotation_id,
+                'later_in_series' => $plan->rotation_id
+                    ? $this->rotations->laterInSeries($plan)->count()
+                    : 0,
             ];
         }
 
@@ -677,16 +728,25 @@ class MoonPlannerController extends Controller
      */
     protected function buildRefinerySummaries(int $corporationId): array
     {
-        $refineries = $this->planner->refineriesForCorporation($corporationId);
+        $refineries = $this->refineries->refineriesForCorporation($corporationId);
         if ($refineries->isEmpty()) {
             return [];
         }
 
-        // Batch moon + structure names.
+        // Batch moon + structure names, and the system each refinery sits in
+        // so the Plan Pull dropdown can be read in system order. The cards
+        // themselves stay in attention order, uncovered and richest first.
         $structureIds = $refineries->pluck('structure_id')->all();
-        $names = DB::table('universe_structures')
+        $structureRows = DB::table('universe_structures')
             ->whereIn('structure_id', $structureIds)
-            ->pluck('name', 'structure_id');
+            ->get(['structure_id', 'name', 'solar_system_id']);
+        $names = $structureRows->pluck('name', 'structure_id');
+        $systemNames = DB::table('solar_systems')
+            ->whereIn('system_id', $structureRows->pluck('solar_system_id')->filter()->unique()->all())
+            ->pluck('name', 'system_id');
+        $systemOf = $structureRows->mapWithKeys(fn ($row) => [
+            (int) $row->structure_id => $systemNames[$row->solar_system_id] ?? null,
+        ]);
         $moonNames = DB::table('moons')
             ->whereIn('moon_id', $refineries->pluck('moon_id')->filter()->all())
             ->pluck('name', 'moon_id');
@@ -701,6 +761,7 @@ class MoonPlannerController extends Controller
                 'structure_id' => $sid,
                 'moon_id' => $refinery->moon_id,
                 'structure_name' => $names[$sid] ?? "Structure {$sid}",
+                'system_name' => $systemOf[$sid] ?? null,
                 'moon_name' => $refinery->moon_id ? ($moonNames[$refinery->moon_id] ?? "Moon {$refinery->moon_id}") : null,
                 'cadence_days' => $cadence['cadence_days'],
                 'arrival_count' => $cadence['arrival_count'],

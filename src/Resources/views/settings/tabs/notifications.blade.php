@@ -143,24 +143,6 @@
                         'has_user_ping' => false,
                         'has_show_amount' => false,
                     ],
-                    'next_extraction_planned' => [
-                        'label' => 'Next Extraction Planned',
-                        'icon' => 'fas fa-calendar-check text-primary',
-                        'desc' => 'The Moon Extraction Planner nudge — fired AFTER a chunk becomes ready, announcing the refinery\'s next planned pull so a director re-fires the drill on schedule. Points at the Moon Planner. Standalone.',
-                        'scope' => 'general',
-                        'has_role_ping' => true,
-                        'has_user_ping' => false,
-                        'has_show_amount' => false,
-                    ],
-                    'schedule_mismatch' => [
-                        'label' => 'Moon Scheduled Off-Plan',
-                        'icon' => 'fas fa-exclamation-triangle text-danger',
-                        'desc' => 'Fires when a moon\'s in-game extraction is set to a materially different time than the Moon Extraction Planner called for (more than the 30-minute match tolerance, but still the same cycle) — i.e. the drill was fired on the wrong timer, or the plan is stale. One ping per plan. Standalone.',
-                        'scope' => 'general',
-                        'has_role_ping' => true,
-                        'has_user_ping' => false,
-                        'has_show_amount' => false,
-                    ],
                     'extraction_at_risk' => [
                         'label' => 'Extraction at Risk',
                         'icon' => 'fas fa-fire text-danger',
@@ -187,6 +169,88 @@
                         'label' => 'Metenox Cargo Bay Full',
                         'icon' => 'fas fa-box-open text-warning',
                         'desc' => 'Fires when a Metenox MoonMaterialBay crosses the configured fill-% threshold (default 85%). Yield-stopping warning, not a structure-safety alert — drilling stops when the bay caps out but the structure itself stays online. Latch prevents repeat fires while still over threshold; resets when cargo is pulled. Standalone — no Manager Core or Structure Manager required.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                ],
+            ],
+            'Moon Planner Notifications' => [
+                'icon' => 'fas fa-calendar-check text-primary',
+                'types' => [
+                    'next_extraction_planned' => [
+                        'label' => 'Next Extraction Planned',
+                        'icon' => 'fas fa-calendar-check text-primary',
+                        'desc' => 'The Moon Extraction Planner nudge — fired AFTER a chunk becomes ready, announcing the refinery\'s next planned pull so a director re-fires the drill on schedule. Points at the Moon Planner. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'schedule_mismatch' => [
+                        'label' => 'Moon Scheduled Off-Plan',
+                        'icon' => 'fas fa-exclamation-triangle text-danger',
+                        'desc' => 'Fires when a moon\'s in-game extraction is set to a materially different time than the Moon Extraction Planner called for (more than the 30-minute match tolerance, but still the same cycle) — i.e. the drill was fired on the wrong timer, or the plan is stale. One ping per plan. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'refinery_gone' => [
+                        'label' => 'Refinery Gone (planned pulls removed)',
+                        'icon' => 'fas fa-house-damage text-danger',
+                        'desc' => 'A refinery has been missing from your corporation\'s structures for at least a day, seen gone three times twelve hours apart, so the pulls planned on it were taken off the calendar. Says why if the game reported it (destroyed, unanchored, handed over) and which blueprints still hold it. One message per refinery. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'extraction_cancelled' => [
+                        'label' => 'Moon Extraction Cancelled',
+                        'icon' => 'fas fa-ban text-danger',
+                        'desc' => 'Somebody stopped a moon extraction in game before its chunk arrived, read from the game\'s own cancellation notice, with who cancelled it. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'moon_not_rescheduled' => [
+                        'label' => 'Moon Not Rescheduled (reminder)',
+                        'icon' => 'fas fa-hourglass-half text-warning',
+                        'desc' => 'A chunk arrived and no new extraction has been started on that refinery since. Sent once the drill has been idle for the hours set below, then again every that many hours if repeats are on, until an extraction starts or the refinery loses its drill. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'schedule_needs_filling' => [
+                        'label' => 'Moons Need Planning (one list)',
+                        'icon' => 'fas fa-calendar-plus text-primary',
+                        'desc' => 'One message listing every refinery with fewer planned pulls ahead than the target set below, with the total. Long lists are cut short with a count of the rest so the message always arrives. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                ],
+            ],
+            'Plugin Health' => [
+                'icon' => 'fas fa-heartbeat text-danger',
+                'types' => [
+                    'price_provider' => [
+                        'label' => 'Price Provider Trouble',
+                        'icon' => 'fas fa-coins text-danger',
+                        'desc' => 'Price refreshes have started failing, or work again. Sent on the change only. Cached prices are kept while the provider is down, so values age rather than drop to zero. Standalone.',
+                        'scope' => 'general',
+                        'has_role_ping' => true,
+                        'has_user_ping' => false,
+                        'has_show_amount' => false,
+                    ],
+                    'moon_scan_missing' => [
+                        'label' => 'Moon Scan Missing',
+                        'icon' => 'fas fa-satellite-dish text-warning',
+                        'desc' => 'Moons your refineries drill that have no scan in SeAT. Their chunks are valued from the game\'s notices instead, only once the first notice is in, and the simulator, Find Moons and the quality ratings cannot see them. One message when a refinery with a moon drill is found on such a moon, when an extraction starts there and when a pull is planned there, and daily as well if you switch that on below. Standalone.',
                         'scope' => 'general',
                         'has_role_ping' => true,
                         'has_user_ping' => false,
@@ -623,8 +687,13 @@
                         'extraction_started' => ['label' => 'Extraction Started', 'icon' => 'fas fa-hammer text-info'],
                         'next_extraction_planned' => ['label' => 'Next Extraction Planned', 'icon' => 'fas fa-calendar-check text-primary'],
                         'schedule_mismatch' => ['label' => 'Moon Scheduled Off-Plan', 'icon' => 'fas fa-exclamation-triangle text-danger'],
+                        'refinery_gone' => ['label' => 'Refinery Gone (planned pulls removed)', 'icon' => 'fas fa-house-damage text-danger'],
+                        'extraction_cancelled' => ['label' => 'Moon Extraction Cancelled', 'icon' => 'fas fa-ban text-danger'],
+                        'moon_not_rescheduled' => ['label' => 'Moon Not Rescheduled (reminder)', 'icon' => 'fas fa-hourglass-half text-warning'],
+                        'schedule_needs_filling' => ['label' => 'Moons Need Planning (one list)', 'icon' => 'fas fa-calendar-plus text-primary'],
                         'tax_outstanding_digest' => ['label' => 'Outstanding Mining Tax (digest)', 'icon' => 'fas fa-clipboard-list text-warning'],
                         'price_provider' => ['label' => 'Price Provider Trouble', 'icon' => 'fas fa-coins text-danger'],
+                        'moon_scan_missing' => ['label' => 'Moon Scan Missing', 'icon' => 'fas fa-satellite-dish text-warning'],
                         'theft_detected' => ['label' => 'Theft Detected', 'icon' => 'fas fa-exclamation-triangle text-warning'],
                         'critical_theft' => ['label' => 'Critical Theft', 'icon' => 'fas fa-skull-crossbones text-danger'],
                         'active_theft' => ['label' => 'Active Theft', 'icon' => 'fas fa-bolt text-danger'],
@@ -748,6 +817,168 @@
                         Placing or moving a pull within this window of another arrival prompts a
                         confirmation. Auto-fill also uses it to spread projected pulls.
                     </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- ═══════════════════════════════════════════════════════════════ --}}
+    {{-- MOON PLANNER — REMINDERS                                          --}}
+    {{-- ═══════════════════════════════════════════════════════════════ --}}
+    <div class="card bg-dark mb-3">
+        <div class="card-header" style="background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-hourglass-half text-warning"></i>
+                Moon Planner Reminders
+            </h5>
+        </div>
+        <div class="card-body">
+            <div class="small text-muted mb-3">
+                Both reminders skip a refinery that cannot pull a chunk:
+                <ul class="mb-1 pl-3">
+                    <li>no moon drill fitted, or the drill has been unfitted</li>
+                    <li>unanchored, destroyed or handed over, so it is gone from your corporation's structures</li>
+                    <li>reported destroyed by the game, even before SeAT's structure list catches up</li>
+                    <li>unanchoring with no extraction running. While one is still running, it is treated as usual.</li>
+                </ul>
+                The full rules are in Help &amp; Documentation, under Moon Planner.
+            </div>
+            <small class="form-text text-muted mb-3 d-block">
+                <strong>Moon Not Rescheduled</strong> goes out when a refinery's chunk arrived this long ago and no
+                new extraction has been started on it since. It stops when an extraction starts, and waits while the
+                drill is offline. Bind it to a webhook under Webhooks to receive it.
+            </small>
+            <div class="form-group row align-items-center">
+                <label for="moon_not_rescheduled_hours" class="col-md-4 col-form-label">
+                    Remind after the drill has been idle for
+                </label>
+                <div class="col-md-3">
+                    <div class="input-group">
+                        <input type="number"
+                               class="form-control"
+                               id="moon_not_rescheduled_hours"
+                               name="moon_not_rescheduled_hours"
+                               min="1" max="336" step="1"
+                               value="{{ old('moon_not_rescheduled_hours', $notificationSettings['moon_not_rescheduled_hours'] ?? 48) }}">
+                        <div class="input-group-append">
+                            <span class="input-group-text">hours</span>
+                        </div>
+                    </div>
+                    @error('moon_not_rescheduled_hours')
+                        <small class="invalid-feedback d-block">{{ $message }}</small>
+                    @enderror
+                </div>
+                <div class="col-md-5">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle"></i>
+                        Counted from the chunk's arrival. Default 48 hours.
+                    </small>
+                </div>
+            </div>
+            <div class="form-group row align-items-center mb-0">
+                <div class="col-md-4 col-form-label">Repeat</div>
+                <div class="col-md-8">
+                    <div class="custom-control custom-switch">
+                        <input type="checkbox" class="custom-control-input"
+                               id="moon_not_rescheduled_repeat" name="moon_not_rescheduled_repeat" value="1"
+                               {{ old('moon_not_rescheduled_repeat', $notificationSettings['moon_not_rescheduled_repeat'] ?? true) ? 'checked' : '' }}>
+                        <label class="custom-control-label" for="moon_not_rescheduled_repeat">
+                            Remind again every that many hours until an extraction starts
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="my-3">
+
+            <small class="form-text text-muted mb-3 d-block">
+                <strong>Moons Need Planning</strong> is one message listing every refinery with fewer pulls planned
+                ahead than the number below, counted the same way as the planner's "Not planned" badge, fewest planned
+                and richest moons first. A long list is cut short with a count of the rest, and always ends with the
+                total. It is only sent while something falls short. A refinery whose drill is offline stays on the
+                list, marked as such.
+            </small>
+            <div class="form-group row align-items-center">
+                <label for="planned_ahead_target" class="col-md-4 col-form-label">
+                    Pulls each refinery should have planned
+                </label>
+                <div class="col-md-3">
+                    <input type="number"
+                           class="form-control"
+                           id="planned_ahead_target"
+                           name="planned_ahead_target"
+                           min="1" max="10" step="1"
+                           value="{{ old('planned_ahead_target', $notificationSettings['planned_ahead_target'] ?? 1) }}">
+                    @error('planned_ahead_target')
+                        <small class="invalid-feedback d-block">{{ $message }}</small>
+                    @enderror
+                </div>
+                <div class="col-md-5">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle"></i>
+                        Default 1: every refinery has its next pull planned.
+                    </small>
+                </div>
+            </div>
+            <div class="form-group row align-items-center mb-0">
+                <label for="schedule_needs_filling_hours" class="col-md-4 col-form-label">
+                    Send the list at most every
+                </label>
+                <div class="col-md-3">
+                    <div class="input-group">
+                        <input type="number"
+                               class="form-control"
+                               id="schedule_needs_filling_hours"
+                               name="schedule_needs_filling_hours"
+                               min="1" max="336" step="1"
+                               value="{{ old('schedule_needs_filling_hours', $notificationSettings['schedule_needs_filling_hours'] ?? 24) }}">
+                        <div class="input-group-append">
+                            <span class="input-group-text">hours</span>
+                        </div>
+                    </div>
+                    @error('schedule_needs_filling_hours')
+                        <small class="invalid-feedback d-block">{{ $message }}</small>
+                    @enderror
+                </div>
+                <div class="col-md-5">
+                    <small class="text-muted">
+                        <i class="fas fa-info-circle"></i>
+                        Default 24 hours. Checked with every extraction import.
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {{-- ═══════════════════════════════════════════════════════════════ --}}
+    {{-- MOON SCAN MISSING                                                --}}
+    {{-- ═══════════════════════════════════════════════════════════════ --}}
+    <div class="card bg-dark mb-3">
+        <div class="card-header" style="background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);">
+            <h5 class="card-title mb-0">
+                <i class="fas fa-satellite-dish text-warning"></i>
+                Moon Scan Missing
+            </h5>
+        </div>
+        <div class="card-body">
+            <small class="form-text text-muted mb-3 d-block">
+                A moon's scan in SeAT is where Mining Manager gets its ore. A moon without one is valued from the
+                game's notices instead, once the first one is in. Moon Scan Missing lists those moons when one of your
+                refineries with a moon drill is found on one, when an extraction starts there and when a pull is planned
+                there, each of them once. It is checked with every extraction import. Bind it to a webhook under
+                Webhooks, in the Plugin Health group, to receive it.
+            </small>
+            <div class="form-group row align-items-center mb-0">
+                <div class="col-md-4 col-form-label">Daily reminder</div>
+                <div class="col-md-8">
+                    <div class="custom-control custom-switch">
+                        <input type="checkbox" class="custom-control-input"
+                               id="moon_scan_missing_daily" name="moon_scan_missing_daily" value="1"
+                               {{ old('moon_scan_missing_daily', $notificationSettings['moon_scan_missing_daily'] ?? false) ? 'checked' : '' }}>
+                        <label class="custom-control-label" for="moon_scan_missing_daily">
+                            Also list every moon still missing a scan once a day, until each one is scanned
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>

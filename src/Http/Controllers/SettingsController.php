@@ -564,6 +564,37 @@ class SettingsController extends Controller
                 'min:1',
                 'max:168',
             ],
+            // Moon Not Rescheduled: hours a drill sits idle after its chunk
+            // arrives before the reminder goes, and between repeats. Up to two
+            // weeks; past that the reminder has stopped being one.
+            'moon_not_rescheduled_hours' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:336',
+            ],
+            'moon_not_rescheduled_repeat' => [
+                'nullable',
+                'boolean',
+            ],
+            // Moons Need Planning: how many pulls each refinery should have
+            // planned ahead, and how often the list goes out.
+            'planned_ahead_target' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:10',
+            ],
+            'schedule_needs_filling_hours' => [
+                'nullable',
+                'integer',
+                'min:1',
+                'max:336',
+            ],
+            'moon_scan_missing_daily' => [
+                'nullable',
+                'boolean',
+            ],
             'moon_extraction_fastpoll_mode' => [
                 'nullable',
                 'in:auto,seat_native',
@@ -641,6 +672,28 @@ class SettingsController extends Controller
             $data['min_extraction_gap_hours'] = ($gapInput !== null && $gapInput !== '')
                 ? (int) $gapInput
                 : 24;
+
+            // Moon Not Rescheduled reminder. The whole tab is one form, so an
+            // unticked repeat box is simply absent and reads as off.
+            $idleInput = $request->input('moon_not_rescheduled_hours');
+            $data['moon_not_rescheduled_hours'] = ($idleInput !== null && $idleInput !== '')
+                ? (int) $idleInput
+                : 48;
+            $data['moon_not_rescheduled_repeat'] = $request->boolean('moon_not_rescheduled_repeat');
+
+            // Moons Need Planning.
+            $targetInput = $request->input('planned_ahead_target');
+            $data['planned_ahead_target'] = ($targetInput !== null && $targetInput !== '')
+                ? (int) $targetInput
+                : 1;
+            $everyInput = $request->input('schedule_needs_filling_hours');
+            $data['schedule_needs_filling_hours'] = ($everyInput !== null && $everyInput !== '')
+                ? (int) $everyInput
+                : 24;
+
+            // Moon Scan Missing goes once per new reason; the daily list on top
+            // of that is opt-in.
+            $data['moon_scan_missing_daily'] = $request->boolean('moon_scan_missing_daily');
 
             // extraction_started detection mode (auto = Manager Core fast-poll
             // when present; seat_native = endpoint-driven cron pass).
@@ -821,9 +874,9 @@ class SettingsController extends Controller
             // readout + deep-link instead. The local manager_core_market
             // setting is kept for the auto-subscribe call below (it's just
             // the bootstrap default — MC's preference wins on read).
-            // manager_core_variant dropped entirely; hardcoded to 'min' in
-            // CachePriceDataCommand because that's the only variant that
-            // makes sense for tax + payout (lowest sell = real buy price).
+            // manager_core_variant dropped entirely: each side is stored at its
+            // actionable price (sell.min, buy.max), the same reduction
+            // PriceProviderService applies on its own provider paths.
 
             // Refining settings
             'use_refined_value' => 'nullable|boolean',
@@ -1360,8 +1413,13 @@ class SettingsController extends Controller
             $data['notify_extraction_started'] = $request->boolean('notify_extraction_started');
             $data['notify_next_extraction_planned'] = $request->boolean('notify_next_extraction_planned');
             $data['notify_schedule_mismatch'] = $request->boolean('notify_schedule_mismatch');
+            $data['notify_refinery_gone'] = $request->boolean('notify_refinery_gone');
+            $data['notify_extraction_cancelled'] = $request->boolean('notify_extraction_cancelled');
+            $data['notify_moon_not_rescheduled'] = $request->boolean('notify_moon_not_rescheduled');
+            $data['notify_schedule_needs_filling'] = $request->boolean('notify_schedule_needs_filling');
             $data['notify_tax_outstanding_digest'] = $request->boolean('notify_tax_outstanding_digest');
             $data['notify_price_provider'] = $request->boolean('notify_price_provider');
+            $data['notify_moon_scan_missing'] = $request->boolean('notify_moon_scan_missing');
             $data['notify_extraction_at_risk'] = $request->boolean('notify_extraction_at_risk');
             $data['notify_extraction_lost'] = $request->boolean('notify_extraction_lost');
             $data['notify_event_created'] = $request->boolean('notify_event_created');
@@ -1433,8 +1491,13 @@ class SettingsController extends Controller
             $data['notify_extraction_started'] = $request->boolean('notify_extraction_started');
             $data['notify_next_extraction_planned'] = $request->boolean('notify_next_extraction_planned');
             $data['notify_schedule_mismatch'] = $request->boolean('notify_schedule_mismatch');
+            $data['notify_refinery_gone'] = $request->boolean('notify_refinery_gone');
+            $data['notify_extraction_cancelled'] = $request->boolean('notify_extraction_cancelled');
+            $data['notify_moon_not_rescheduled'] = $request->boolean('notify_moon_not_rescheduled');
+            $data['notify_schedule_needs_filling'] = $request->boolean('notify_schedule_needs_filling');
             $data['notify_tax_outstanding_digest'] = $request->boolean('notify_tax_outstanding_digest');
             $data['notify_price_provider'] = $request->boolean('notify_price_provider');
+            $data['notify_moon_scan_missing'] = $request->boolean('notify_moon_scan_missing');
             $data['notify_extraction_at_risk'] = $request->boolean('notify_extraction_at_risk');
             $data['notify_extraction_lost'] = $request->boolean('notify_extraction_lost');
             $data['notify_event_created'] = $request->boolean('notify_event_created');
@@ -1611,8 +1674,13 @@ class SettingsController extends Controller
             'notify_extraction_started' => 'nullable|boolean',
             'notify_next_extraction_planned' => 'nullable|boolean',
             'notify_schedule_mismatch' => 'nullable|boolean',
+            'notify_refinery_gone' => 'nullable|boolean',
+            'notify_extraction_cancelled' => 'nullable|boolean',
+            'notify_moon_not_rescheduled' => 'nullable|boolean',
+            'notify_schedule_needs_filling' => 'nullable|boolean',
             'notify_tax_outstanding_digest' => 'nullable|boolean',
             'notify_price_provider' => 'nullable|boolean',
+            'notify_moon_scan_missing' => 'nullable|boolean',
             'notify_extraction_at_risk' => ['nullable', 'boolean', $crossPluginRule],
             'notify_extraction_lost' => ['nullable', 'boolean', $crossPluginRule],
             'notify_event_created' => 'nullable|boolean',

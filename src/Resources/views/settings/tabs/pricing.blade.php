@@ -154,10 +154,10 @@
                  MM + a deep-link button into MC's Pricing Preferences page.
 
                  The previous "Price Variant" dropdown (min/max/avg/median/
-                 percentile) is gone — variant=min is the only one that
-                 makes sense for tax + payout calculation (lowest sell =
-                 actual market price for an instant buy). Hard-coded to
-                 'min' in CachePriceDataCommand. --}}
+                 percentile) is gone: each side is stored at its actionable
+                 price — sell.min is what you pay to buy now, buy.max is what
+                 you get for selling now — which is the same reduction
+                 PriceProviderService applies on its provider paths. --}}
             <div id="manager-core-config" style="display: none;" class="mt-4 p-3 bg-secondary rounded border border-info">
                 <h6 class="text-info mb-3">
                     <i class="fas fa-cubes"></i> Manager Core Configuration

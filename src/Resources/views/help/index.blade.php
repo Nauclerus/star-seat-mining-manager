@@ -1536,6 +1536,63 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         <li><strong>{{ trans('mining-manager::help.tax_selector_no_moon') }}</strong></li>
                     </ul>
                     <p>{{ trans('mining-manager::help.tax_selector_toggles') }}</p>
+
+                    <h4><i class="fas fa-skull"></i> Abyssal Ore and Triglavian Ore, which is which</h4>
+                    <p>
+                        These two names cause more confusion than any other pair of settings here, and the
+                        confusion runs the wrong way round: the valuable ore is under <strong>Abyssal</strong>,
+                        not under Triglavian.
+                    </p>
+                    <div class="table-responsive">
+                    <table class="table table-sm" style="color: #d1d5db;">
+                        <thead>
+                            <tr><th>Category</th><th>What is in it</th><th>Worth anything?</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><strong>Abyssal Ore</strong></td>
+                                <td>
+                                    Bezdnacine, Rakovene and Talassonite. Every grade, plus the compressed
+                                    forms and Nesosilicate Rakovene. This is the border ore from nullsec and
+                                    wormhole space, including Ore Prospecting Array escalations.
+                                </td>
+                                <td>Yes. It has a market price and it reprocesses.</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Triglavian Ore</strong></td>
+                                <td>
+                                    Banidine, Augumene, Mercium, Lyavite, Pithix, Green Arisite, Oeryl,
+                                    Geodite and Polygypsum. Objective ore that missions and sites ask you to
+                                    mine and hand in.
+                                </td>
+                                <td>No, and it never will be.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    </div>
+                    <p>
+                        Nothing belongs to both, and if you mine ore from an escalation it is billed at your
+                        <strong>Abyssal Ore</strong> rate.
+                    </p>
+
+                    <div class="info-box">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Why the objective ore is always worth zero.</strong>
+                        Those nine have no market group in EVE, so they cannot be listed or sold and no price
+                        exists to look up, from any provider. They also have no reprocessing output, so there is
+                        no refined value to fall back on. Both routes to a value are closed by the game itself.
+                        They still count towards mined volume, so a member's m&sup3; can include them, but they
+                        never add ISK and they are never taxed whatever you set that rate to.
+                    </div>
+
+                    <p>
+                        <strong>Where the Abyssal name came from.</strong> The three grades used to be called
+                        Bezdnacine, <em>Abyssal</em> Bezdnacine and <em>Hadal</em> Bezdnacine, and the same for
+                        the other two. CCP later dropped those adjectives across the whole game in favour of
+                        II-Grade and III-Grade, which is why the SDE now says Rakovene II-Grade where the old
+                        name was Abyssal Rakovene. The category kept the old adjective. It is not a reference to
+                        Abyssal Deadspace, whatever the name suggests.
+                    </p>
                 </div>
 
                 {{-- Guest Mining --}}
@@ -2068,8 +2125,16 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         worth nothing.
                     </p>
                     <p>
-                        Both are skipped when mining is imported and when mining events are tallied, so nothing further
-                        along ever sees them. Rows of any of these already in your ledger are left as they were.
+                        <strong>Zuthrine</strong> (<code>28626</code>) is left out as well. EVE gives it full flavour
+                        text, a Mercoxit-family rock full of Morphite that needs deep core mining, but it has no
+                        market group, so it cannot be sold, and no reprocessing output, so it cannot be refined.
+                        There is no route to a value for it and there never will be. It appears to be objective ore
+                        that something asks you to mine and hand in.
+                    </p>
+                    <p>
+                        All three are skipped when mining is imported and when mining events are tallied, so nothing
+                        further along ever sees them. Rows of any of these already in your ledger are left as they
+                        were.
                     </p>
                 </div>
 
@@ -2367,6 +2432,10 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                                 <tr>
                                     <td><i class="fas fa-chart-bar text-primary"></i> {{ trans('mining-manager::help.webhook_cat_reports') }}</td>
                                     <td>{{ trans('mining-manager::help.webhook_cat_reports_events') }}</td>
+                                </tr>
+                                <tr>
+                                    <td><i class="fas fa-heartbeat text-danger"></i> {{ trans('mining-manager::help.webhook_cat_health') }}</td>
+                                    <td>{{ trans('mining-manager::help.webhook_cat_health_events') }}</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -2722,6 +2791,21 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <h4>{{ trans('mining-manager::help.moon_tracking') }}</h4>
                     <p>{{ trans('mining-manager::help.moon_tracking_desc') }}</p>
 
+                    <h4><i class="fas fa-calendar-alt"></i> The extraction calendar</h4>
+                    <p>
+                        <strong>Extraction Calendar</strong> shows three months at a time, the one you are on and
+                        the two after it, each as its own grid. Prev and next move that window a month at a time and
+                        <strong>Today</strong> brings it back. <strong>Week</strong> and <strong>List</strong> swap
+                        in when you want a closer look at one week.
+                    </p>
+                    <p>
+                        Every chunk carries the tier of its moon, R4 to R64, worked out from that extraction's own
+                        ore rather than whatever the refinery pulled last, so an unusual chunk is labelled for what
+                        it actually is. Hovering gives the full refinery name and its moon, which the cells are too
+                        narrow to show. The colour is the chunk's state, as the legend above the grid says, and the
+                        grid runs on EVE time (UTC) like everything else here.
+                    </p>
+
                     <h4>{{ trans('mining-manager::help.moon_compositions') }}</h4>
                     <p>{{ trans('mining-manager::help.moon_compositions_desc') }}</p>
 
@@ -2760,6 +2844,69 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                             <p>{{ trans('mining-manager::help.moon_status_expired_desc') }}</p>
                         </div>
                     </div>
+                </div>
+
+                {{-- Moon drilling rigs --}}
+                <div class="help-card">
+                    <h3>
+                        <i class="fas fa-cog"></i>
+                        Moon Drilling Rigs
+                    </h3>
+                    <p>
+                        A refinery's moon drilling rigs change how long its chunks can be mined and how much ore they
+                        hold. The chunk cycle above stays the same, fracture, the mining window, then 2 hours
+                        unstable; the rigs only stretch the window and add to the yield.
+                    </p>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-dark">
+                            <thead>
+                                <tr><th>Refinery</th><th>Rig</th><th>What it does</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Athanor</td><td>Standup M-Set Moon Drilling Efficiency I / II</td><td>+2% / +2.4% ore in each chunk</td></tr>
+                                <tr><td>Athanor</td><td>Standup M-Set Moon Drilling Stability I / II</td><td>a 72 / 96 hour mining window instead of 48, and 3h 36m / 3h 43m before the chunk fractures on its own instead of 3h</td></tr>
+                                <tr><td>Tatara</td><td>Standup L-Set Moon Drilling Proficiency I / II</td><td>both of the above from one rig</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p>
+                        <strong>Which rig a chunk had comes from the chunk itself.</strong> EVE times every chunk to
+                        fracture on its own after it arrives, and that time already includes the rig: 3 hours with
+                        none, 3h 36m with Tech I, 3h 43m with Tech II. Mining Manager reads the rig from that time,
+                        chunk by chunk, so swapping a rig never changes a chunk already pulled, and it works for any
+                        refinery, another corporation's included.
+                    </p>
+                    <p>
+                        <strong>What is fitted now</strong> comes from the refinery's rig slots in SeAT's copy of the
+                        corporation assets, which needs a Director token with the corporation assets scope. Each
+                        extraction keeps a record of the rigs seen while its chunk was on its way. On an Athanor that
+                        record is the only way to know the yield rig, so where SeAT cannot see the fittings the
+                        extraction page says the yield is unknown rather than guessing.
+                    </p>
+                    <p>
+                        <strong>The game's own figures win.</strong> EVE reports a chunk's ore volumes when the
+                        extraction starts, when the chunk arrives, and when it is fractured, by the laser or on its
+                        own. Mining Manager uses the newest of these, so the extraction's value and Moon Analytics
+                        follow what is really in the chunk, and the extraction page lists each report and whether the
+                        figure changed. The extra a yield rig added is worked back out of those figures.
+                    </p>
+                    <p>
+                        <strong>In the simulator</strong>, pick an Athanor or a Tatara and each rig at none, Tech I or
+                        Tech II. It starts from what is fitted on our refinery at that moon; choose something else and
+                        a banner says what is really fitted. Both Tech II rigs fit an Athanor together, using 300 of
+                        its 400 calibration and leaving room for one more Tech I rig. Find Moons and the quality
+                        ratings still value the moon on its own.
+                    </p>
+                    <p>
+                        <strong>In Moon Analytics</strong>, a cog after a refinery's name shows the moon rigs fitted on
+                        it now, and a cog beside the extraction count shows how many of the month's chunks were pulled
+                        with rigs. Hover either for the detail. Each chunk is marked from its own timer and the record
+                        kept with it, so fitting or pulling a rig later never changes how an older chunk is shown.
+                    </p>
+                    <p>
+                        <code>mining-manager:diagnose-extractions</code> lists each refinery's drill and moon rigs, and
+                        Diagnostics compares the rigs SeAT can see with what each refinery's latest chunk was timed with.
+                    </p>
                 </div>
 
                 {{-- Cross-Plugin Threat Alerts (v2.0.0+) --}}
@@ -2821,15 +2968,15 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                     <div class="feature-grid">
                         <div class="feature-item" style="border-left: 4px solid #17a2b8;">
                             <h5><code>mining.extraction_ready</code></h5>
-                            <p>Chunk has fractured, 48h fleet-able mining window opens. Payload includes window_opens_at, window_closes_at, is_jackpot, estimated_value.</p>
+                            <p>Chunk has fractured and its mining window opens: 48 hours, or 72 / 96 with a Moon Drilling Stability or Proficiency rig. Payload includes window_opens_at, window_closes_at, mining_window_hours, timer_rig_tier, is_jackpot, estimated_value.</p>
                         </div>
                         <div class="feature-item" style="border-left: 4px solid #f39c12;">
                             <h5><code>mining.extraction_unstable</code></h5>
-                            <p>Final 2h capital-safety window before expiry (48-50h after fracture). Use for last-call FC reminders.</p>
+                            <p>The final 2 hours before expiry, after the mining window. Use for last-call FC reminders.</p>
                         </div>
                         <div class="feature-item" style="border-left: 4px solid #6c757d;">
                             <h5><code>mining.extraction_expired</code></h5>
-                            <p>Window closed, no more mining (past 50h after fracture). Consumers should drop the extraction from active views.</p>
+                            <p>Window closed, no more mining (past the mining window and its 2 hour tail). Consumers should drop the extraction from active views.</p>
                         </div>
                     </div>
 
@@ -3005,6 +3152,41 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         a smaller crew the spacing matters as much as the schedule itself.
                     </p>
 
+                    <p>
+                        Each pull on the calendar carries the tier of its moon, R4 to R64, the same badge the
+                        Blueprints grid and the refinery cards use, and hovering one gives the full refinery name
+                        and its moon. Today is picked out in amber.
+                    </p>
+
+                    <p>
+                        <strong>Only refineries with a moon drill count.</strong> An Athanor or Tatara with no Moon
+                        Drilling service fitted is a reprocessing or reaction station, so it is left out of the
+                        refinery list, Auto-fill, the blueprint picker, the reminders and the counts. A drill that is
+                        offline, out of fuel for example, is still fitted, and its refinery stays.
+                        <code>mining-manager:diagnose-extractions</code> shows which of your refineries have one.
+                    </p>
+
+                    <p>
+                        <strong>Nothing is taken away while the structure is still there.</strong> Planned pulls and
+                        blueprint slots only go once a refinery has left your corporation: unanchored, destroyed or
+                        handed over. Until then the planner and the Blueprints grid put a <strong>!</strong> on it.
+                        Hover it for the reason:
+                    </p>
+                    <ul>
+                        <li>
+                            <strong>Yellow, Unanchoring in progress.</strong> The unanchor timer is running. Cancel it
+                            and the mark goes after the next structure sync.
+                        </li>
+                        <li>
+                            <strong>Yellow, No moon drill fitted.</strong> The drill has been unfitted. Its pulls and
+                            slots stay in case it goes back on, but nothing new is planned on it.
+                        </li>
+                        <li>
+                            <strong>Red, Structure gone, not cleared yet.</strong> It has left your corporation. Its
+                            pulls come off once that is certain, as described under Blueprints below.
+                        </li>
+                    </ul>
+
                     <div class="info-box">
                         <i class="fas fa-info-circle"></i>
                         <strong>The planner does not control your structures.</strong>
@@ -3049,6 +3231,76 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         from your in-game notifications.
                     </p>
 
+                    <h4><i class="fas fa-drafting-compass"></i> Blueprints</h4>
+                    <p>
+                        Auto-fill guesses from history. A <strong>blueprint</strong> is the other way round: you say
+                        what the rotation should be, and the planner lays it down. It is a pattern of pulls over one
+                        to eight weeks &mdash; which refinery, which weekday, what EVE time &mdash; on the
+                        <strong>Blueprints</strong> tab next to the planner.
+                    </p>
+                    <p>
+                        Build it on the grid: a row per week, a column per weekday, and a <code>+</code> in any cell
+                        to drop a refinery and a time into it. Save it, then apply it, either from this tab or with
+                        <strong>Plan from Blueprint</strong> on the planner itself: pick the blueprint, the date to
+                        start from and how many cycles to write, and you get the full list before anything is saved. Each line says whether it will be planned, skipped and why (before your
+                        start date, already in the past, or that refinery is already planned within half an hour),
+                        or planned but landing inside the minimum gap of another moon.
+                    </p>
+                    <p>
+                        <strong>Make this blueprint the plan for these weeks</strong> is the tick box on that
+                        dialog. Left alone, a day that already has a pull on it is skipped and kept. Ticked, the
+                        blueprint takes the weeks over: everything else planned in them is removed first,
+                        including the days the pattern does not use at all. Swapping a Monday to Friday rotation
+                        for a Monday, Wednesday, Friday one takes the Tuesday and Thursday pulls with it, instead
+                        of leaving both patterns on the calendar at once. You get the full list of what would go,
+                        and where each one came from, before you confirm. A pull that is already running, one
+                        already matched to an extraction, and anything outside the weeks you are applying are
+                        never touched.
+                    </p>
+                    <p>
+                        The pattern keeps its weekdays. Starting a blueprint on a Friday runs whatever is left of
+                        that week first, then carries on from the Monday, so a moon you put on Monday stays on
+                        Monday.
+                    </p>
+                    <p>
+                        <strong>A refinery belongs to a blueprint once.</strong> The picker only offers the ones
+                        the pattern does not already use, and the count above the grid says how many are placed
+                        and how many are still to go, so nothing gets scheduled twice or quietly left out. Each
+                        one is labelled with its moon's tier, R4 to R64, so the rich moons are easy to spot.
+                        Click any pull in the grid to change its refinery or time, or to remove it.
+                    </p>
+                    <p>
+                        <strong>A refinery that is unanchored, destroyed or handed to someone else</strong> is flagged
+                        in red wherever it appears, and applying never plans a pull on it. The pulls planned on it
+                        come off the calendar by themselves, whether a blueprint wrote them or somebody planned them
+                        by hand, but only once it has been missing on three sightings at least twelve hours apart. A
+                        structure can vanish from SeAT for an afternoon when ESI or the server has a bad day, and
+                        being seen again in between starts the count over. Each refinery that goes sends its own
+                        <strong>Refinery Gone</strong> notification, saying which blueprints still hold it, how many
+                        pulls went, and why, if the game reported it.
+                    </p>
+                    <p>
+                        A refinery that is still there keeps its slots and its pulls. With its drill unfitted it is
+                        marked in yellow and applying skips it until the drill is back. Being unanchored, it is
+                        marked in yellow and planned as usual, since the unanchor can still be cancelled.
+                    </p>
+                    <p>
+                        The blueprint slots themselves stay until you press the button that clears them out of every
+                        blueprint. That part is deliberately yours: a pattern is cheap to keep and annoying to
+                        rebuild.
+                    </p>
+
+                    <div class="info-box">
+                        <i class="fas fa-shield-alt"></i>
+                        <strong>A blueprint never touches what has already happened.</strong>
+                        Editing one offers to carry the change to the pulls it already wrote: slots that moved move,
+                        slots you removed are taken off the calendar, slots you added appear in every cycle still
+                        ahead. Pulls in the past, and pulls already matched to a real extraction, stay exactly as
+                        they are. The same goes for moving or deleting a single pull: the planner asks whether to
+                        carry it to that moon's later pulls in the rotation, and carrying a move shifts them by the
+                        same amount so the spacing survives.
+                    </div>
+
                     <h4><i class="fas fa-arrows-alt-h"></i> Moving pulls, and the gap warning</h4>
                     <p>
                         Move a pull to a different day and it stays there &mdash; later projections follow the new
@@ -3082,6 +3334,67 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         that the pull went ahead off-plan. Both clear the warning, both ask for a reason, and both are
                         saved to the planner history with your name. Neither moves later planned pulls for that
                         refinery, and the in-game extraction isn't touched.
+                    </p>
+
+                    <h4><i class="fas fa-bell"></i> Planner reminders</h4>
+                    <p>Three notifications cover what nobody has done yet. Each is off until you tick it on a webhook.</p>
+                    <ul>
+                        <li>
+                            <strong>Moon Extraction Cancelled</strong> says when somebody stops an extraction in game
+                            before its chunk arrives, with who did it and when the chunk was due.
+                        </li>
+                        <li>
+                            <strong>Moon Not Rescheduled</strong> goes out when a chunk arrived a while ago and no new
+                            extraction has been started on that refinery since: 48 hours by default, then again every 48
+                            hours until one starts. It waits while the drill is offline, since there is nothing you
+                            could start.
+                        </li>
+                        <li>
+                            <strong>Moons Need Planning</strong> is one message listing every refinery with fewer pulls
+                            planned ahead than you ask for, counted like the <code>Not planned</code> badge below, with
+                            the total at the end. A long list stops at 25 and counts the rest, so it always arrives.
+                            A refinery whose drill is offline stays on the list, marked <code>drill offline</code>:
+                            the drill is still fitted, and pulls can be planned for when the fuel is back.
+                        </li>
+                    </ul>
+                    <p>
+                        <strong>Which refineries they leave out.</strong> Moon Not Rescheduled and Moons Need Planning
+                        only speak about refineries that can pull a chunk. Every refinery is checked again before each
+                        message, and one is left out when:
+                    </p>
+                    <ul>
+                        <li>
+                            <strong>It has no moon drill.</strong> An Athanor or Tatara with no Moon Drilling service is
+                            a reprocessing or reaction station. Unfitting the drill to give a refinery another job takes
+                            it out of both reminders at the next structure sync. Pulls already planned on it stay,
+                            marked in yellow.
+                        </li>
+                        <li>
+                            <strong>It is no longer yours.</strong> Unanchored, destroyed or handed to another
+                            corporation, it drops out of your corporation's structures when SeAT next syncs them.
+                        </li>
+                        <li>
+                            <strong>The game has reported it destroyed.</strong> The Structure Destroyed notification
+                            counts straight away, even before SeAT's structure list has caught up.
+                        </li>
+                        <li>
+                            <strong>It is unanchoring with no extraction running.</strong> Unanchoring takes seven
+                            days, too short for a new pull to arrive and be mined before the structure goes, so there
+                            is nothing to plan. A refinery that is still extracting while it unanchors is treated as
+                            usual until that extraction ends. Cancel the unanchor and the reminders pick it up again
+                            after the next structure sync.
+                        </li>
+                    </ul>
+                    <p>
+                        Leaving a refinery out never resets its reminders. If it drops out of SeAT for a sync, or its
+                        drill comes back online, or an unanchor is cancelled, Moon Not Rescheduled carries on with the
+                        next reminder instead of starting again at the first, so a bad day for ESI cannot turn into a
+                        repeat. The count is only forgotten when an extraction starts, or once the refinery is
+                        certainly gone: confirmed by the Refinery Gone check, or reported destroyed.
+                    </p>
+                    <p>
+                        The hours, the repeat, how many pulls to plan ahead and how often the list goes are all under
+                        <strong>Settings, Notifications, Moon Planner Reminders</strong>.
                     </p>
 
                     <h4><i class="fas fa-industry"></i> The refinery panel</h4>
@@ -3428,6 +3741,7 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                         <li>{{ trans('mining-manager::help.moon_analytics_utilization') }}</li>
                         <li>{{ trans('mining-manager::help.moon_analytics_pool_vs_mined') }}</li>
                         <li>{{ trans('mining-manager::help.moon_analytics_per_extraction') }}</li>
+                        <li>{{ trans('mining-manager::help.moon_analytics_rigs') }}</li>
                         <li>{{ trans('mining-manager::help.moon_analytics_popularity') }}</li>
                     </ul>
                 </div>
@@ -3534,6 +3848,13 @@ docker compose -f docker-compose.yml -f docker-compose.mariadb.yml -f docker-com
                                     <td><span class="badge badge-info">{{ trans('mining-manager::help.schedule_30min') }}</span></td>
                                     <td>Import personal mining data from SeAT's ESI cache (belt, anomaly, ice, gas mining). Each run covers the last two days of mining. Mining SeAT only saves after that is left out on purpose, so days already billed and summarised don't change.<br>
                                         <small class="text-muted">Options: <code>--character_id=</code> specific character, <code>--days=30</code> lookback by mining date, <code>--force</code> re-import existing entries, <code>--dry-run</code> show what it would change without writing anything</small>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td><code>mining-manager:resolve-characters</code></td>
+                                    <td><span class="badge badge-info">{{ trans('mining-manager::help.schedule_1min') }}</span></td>
+                                    <td>Looks up names and corporations for characters SeAT does not know, such as visiting miners, and keeps them for every page to read, so no page ever waits on ESI. Every minute it takes the characters pages have asked for, which show as <em>Character info in progress</em> until then, and the page refreshes once they are in. Every 10 minutes it also takes miners SeAT has no affiliation for, which is how the dashboard tells a visiting miner from a member. ESI comes first, then EVEWho and zKillboard when ESI is down, and it stops calling ESI while the error budget it shares with SeAT is low.<br>
+                                        <small class="text-muted">Options: <code>--requested</code> only the characters pages asked for, <code>--stats</code> what the table holds</small>
                                     </td>
                                 </tr>
                                 <tr>

@@ -23,10 +23,25 @@
     .mm-planner-month .fc-col-header-cell { background: rgba(255,255,255,0.04); }
     .mm-planner-month .fc-col-header-cell-cushion { text-transform:uppercase; font-size:0.7rem; letter-spacing:0.04em; color:#9aa4b2; padding:6px 4px; }
     .mm-planner-month .fc-daygrid-day-number { font-size:0.75rem; color:#8a94a3; padding:4px 6px; }
-    .mm-planner-month .fc-day-today { background: rgba(52,152,219,0.10) !important; }
+    /* The same amber the extraction calendar uses. A 10% blue tint on a blue-grey
+       grid was invisible, and today is the one cell you look for first. */
+    .mm-planner-month .fc-day-today { background: rgba(243,156,18,0.15) !important; }
+    .mm-planner-month .fc-day-today .fc-daygrid-day-number { color:#f39c12; font-weight:700; }
     .mm-planner-month .fc-event { border-radius:4px; padding:1px 4px; font-size:0.72rem; margin:1px 2px; box-shadow:0 1px 2px rgba(0,0,0,0.25); }
     .mm-planner-month .fc-event:hover { filter:brightness(1.12); }
     .mm-planner-month .fc-daygrid-event { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    /* One event reads left to right as time, moon tier, refinery. The badge is
+       the same family as the Blueprints grid and the sidebar cards, so a rich
+       moon looks the same everywhere it appears. */
+    .mm-planner-month .mm-cal-event { display:flex; align-items:center; gap:4px; min-width:0; }
+    .mm-planner-month .mm-cal-time { flex:none; font-weight:600; }
+    .mm-planner-month .mm-cal-tier { flex:none; font-size:0.62rem; padding:1px 4px; line-height:1.25; }
+    .mm-planner-month .mm-cal-title { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* Why a refinery cannot pull, on hover: yellow while it is still there and
+       could change back, red once it is gone. Same mark as the Blueprints grid. */
+    .moon-planner-page .mm-flag { display:inline-block; flex:none; width:1.1em; height:1.1em; line-height:1.1em; border-radius:50%; text-align:center; font-weight:700; cursor:help; }
+    .moon-planner-page .mm-flag-warn { background:#ffc107; color:#212529; }
+    .moon-planner-page .mm-flag-gone { background:#dc3545; color:#fff; box-shadow:0 0 0 1px #fff; }
     .mm-month-heading { display:flex; align-items:center; gap:8px; font-weight:600; color:#cfd6df; }
     .mm-month-heading .mm-month-pill { font-size:0.65rem; background:rgba(255,255,255,0.06); color:#9aa4b2; padding:1px 8px; border-radius:10px; }
 
@@ -79,6 +94,12 @@
                     <span class="badge badge-primary ml-1" style="font-size: 0.6em;">Moon Manager</span>
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link" href="{{ route('mining-manager.moon.blueprints') }}">
+                    <i class="fas fa-drafting-compass"></i> Blueprints
+                    <span class="badge badge-primary ml-1" style="font-size: 0.6em;">Moon Manager</span>
+                </a>
+            </li>
         </ul>
     </div>
     <div class="card-body">
@@ -117,6 +138,10 @@
                     <i class="fas fa-magic"></i> Auto-fill from History
                 </button>
             </form>
+            <button type="button" class="btn btn-sm btn-outline-primary ml-1" id="btn-plan-blueprint"
+                    title="Lay a repeating pattern of pulls over the calendar from a date you choose">
+                <i class="fas fa-drafting-compass"></i> Plan from Blueprint
+            </button>
             <button type="button" class="btn btn-sm btn-outline-secondary ml-1" id="btn-history"
                     title="Who changed what on the planner">
                 <i class="fas fa-history"></i> History
@@ -236,7 +261,14 @@
                     @forelse($refinerySummaries as $r)
                         <div class="mm-sidebar-item mm-refinery-card mb-2">
                             <div class="mm-structure-name d-flex justify-content-between align-items-start">
-                                <span><i class="fas fa-building text-primary"></i> {{ $r['structure_name'] }}</span>
+                                <span>
+                                    <i class="fas fa-building text-primary"></i> {{ $r['structure_name'] }}
+                                    @if(!empty($refineryFlags[$r['structure_id']]))
+                                        @php $flag = $refineryFlags[$r['structure_id']]; @endphp
+                                        <span class="mm-flag {{ $flag === 'gone' ? 'mm-flag-gone' : 'mm-flag-warn' }}"
+                                              title="{{ \MiningManager\Services\Moon\RefineryService::FLAG_LABELS[$flag] ?? '' }}">!</span>
+                                    @endif
+                                </span>
                                 @if(!empty($r['rarity']))
                                     <span class="badge ml-1 {{ \MiningManager\Services\Moon\MoonOreHelper::rarityBadgeClass($r['rarity']) }}"
                                           title="Highest ore tier on this moon">{{ $r['rarity'] }}</span>
@@ -290,7 +322,7 @@
                     @empty
                         <div class="text-center text-muted py-3">
                             <i class="fas fa-industry fa-2x mb-2"></i>
-                            <p class="mb-0">No Athanor/Tatara refineries found for this corporation.</p>
+                            <p class="mb-0">No Athanor or Tatara with a moon drill fitted found for this corporation.</p>
                         </div>
                     @endforelse
                 </div>
@@ -432,6 +464,34 @@
         </div>
     </div>
 </div>
+@include('mining-manager::moon.partials._blueprint_apply', ['blueprints' => $blueprintList ?? []])
+
+<div class="modal fade" id="noBlueprintModal" tabindex="-1" role="dialog">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content bg-dark text-light">
+            <div class="modal-header">
+                <h5 class="modal-title text-danger"><i class="fas fa-exclamation-triangle"></i> No blueprint yet</h5>
+                <button type="button" class="close text-light" data-dismiss="modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="mm-note mm-note-warn mb-0">
+                    <p class="mb-2">
+                        A blueprint is the repeating pattern you plan from: which refinery, which weekday,
+                        what EVE time, over one to eight weeks. There are none saved yet, so there is
+                        nothing to lay over the calendar.
+                    </p>
+                    <p class="mb-0">Build one on the <strong>Blueprints</strong> tab, then come back here.</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-sm btn-secondary" data-dismiss="modal">Close</button>
+                <a class="btn btn-sm btn-success" href="{{ route('mining-manager.moon.blueprints') }}">
+                    <i class="fas fa-drafting-compass"></i> Create a blueprint
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
 @endsection
 
 @push('javascript')
@@ -441,6 +501,8 @@ document.addEventListener('DOMContentLoaded', function () {
     const CSRF = $('meta[name="csrf-token"]').attr('content');
     const calendarData = @json($calendar ?? []);
     const refineries = @json($refinerySummaries ?? []);
+    const refineryFlags = @json((object) ($refineryFlags ?? []));
+    const FLAG_LABELS = @json(\MiningManager\Services\Moon\RefineryService::FLAG_LABELS);
     const minGap = {{ $minGapHours }};
     const routes = {
         store: '{{ route('mining-manager.moon.planner.store') }}',
@@ -507,6 +569,14 @@ document.addEventListener('DOMContentLoaded', function () {
           });
     });
 
+    const RARITY_CLASS = { R4: 'badge-r4', R8: 'badge-r8', R16: 'badge-r16', R32: 'badge-r32', R64: 'badge-r64' };
+
+    // The tier of each refinery's moon is already on the page for the sidebar
+    // cards, so the calendar costs nothing extra to label. A refinery the corp
+    // no longer owns is not in that list and simply goes unbadged.
+    const rarityByStructure = {};
+    refineries.forEach(r => { if (r.rarity) { rarityByStructure[r.structure_id] = r.rarity; } });
+
     // ---- Build FullCalendar events from the day-grouped payload ----
     const events = [];
     for (const [day, entries] of Object.entries(calendarData)) {
@@ -540,6 +610,47 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    function renderEvent(arg) {
+        const raw = arg.event.extendedProps.raw || {};
+        const wrap = document.createElement('div');
+        wrap.className = 'mm-cal-event';
+        wrap.title = raw.structure_name + (raw.moon_name ? ' (' + raw.moon_name + ')' : '');
+
+        // Marked on every plan, and on a real pull still to come. A pull
+        // already done is history, whatever became of the refinery since.
+        const flag = refineryFlags[raw.structure_id];
+        const upcoming = arg.event.start && arg.event.start.getTime() > Date.now();
+        if (flag && (arg.event.extendedProps.type === 'plan' || (!raw.archived && upcoming))) {
+            const mark = document.createElement('span');
+            mark.className = 'mm-flag ' + (flag === 'gone' ? 'mm-flag-gone' : 'mm-flag-warn');
+            mark.title = FLAG_LABELS[flag] || '';
+            mark.textContent = '!';
+            wrap.appendChild(mark);
+        }
+
+        if (arg.timeText) {
+            const time = document.createElement('span');
+            time.className = 'mm-cal-time';
+            time.textContent = arg.timeText;
+            wrap.appendChild(time);
+        }
+
+        const tier = rarityByStructure[raw.structure_id];
+        if (tier) {
+            const badge = document.createElement('span');
+            badge.className = 'badge mm-cal-tier ' + (RARITY_CLASS[tier] || 'badge-secondary');
+            badge.textContent = tier;
+            wrap.appendChild(badge);
+        }
+
+        const title = document.createElement('span');
+        title.className = 'mm-cal-title';
+        title.textContent = arg.event.title;
+        wrap.appendChild(title);
+
+        return { domNodes: [wrap] };
+    }
+
     function onEventClick(info) {
         info.jsEvent.preventDefault();
         const p = info.event.extendedProps;
@@ -568,6 +679,7 @@ document.addEventListener('DOMContentLoaded', function () {
             height: 'auto',
             eventDisplay: 'block',
             dayMaxEvents: 4,
+            eventContent: renderEvent,
             eventClick: onEventClick,
         });
         cal.render();
@@ -576,7 +688,15 @@ document.addEventListener('DOMContentLoaded', function () {
     // ---- Modal helpers ----
     function fillRefinerySelect(selectedId) {
         const $sel = $('#plan-structure-id').empty();
-        refineries.forEach(r => {
+        // By system, then by name inside it. The cards down the side are in
+        // attention order, which is no use when you are hunting for one rig in
+        // a list. A refinery whose system we don't know sorts to the bottom.
+        const ordered = refineries.slice().sort((a, b) => {
+            const keyA = (a.system_name || '￿') + ' ' + (a.structure_name || '');
+            const keyB = (b.system_name || '￿') + ' ' + (b.structure_name || '');
+            return keyA.localeCompare(keyB, undefined, { numeric: true, sensitivity: 'base' });
+        });
+        ordered.forEach(r => {
             const label = r.structure_name + (r.moon_name ? ' — ' + r.moon_name : '');
             $sel.append($('<option>').val(r.structure_id).text(label));
         });
@@ -616,6 +736,7 @@ document.addEventListener('DOMContentLoaded', function () {
     $(document).on('input change', '#plan-arrival', updateLocalConfirm);
 
     function openAddModal(structureId, projectedIso) {
+        editingPlan = null;
         $('#planModalTitle').text('Plan Pull');
         $('#plan-id').val('');
         $('#refinery-select-group').show();
@@ -628,7 +749,12 @@ document.addEventListener('DOMContentLoaded', function () {
         $('#planModal').appendTo('body').modal('show');
     }
 
+    // The pull the modal is open on, kept so a save or a delete can offer to
+    // carry to the rest of its blueprint.
+    let editingPlan = null;
+
     function openEditModal(raw) {
+        editingPlan = raw;
         $('#planModalTitle').text('Edit Planned Pull');
         $('#plan-id').val(raw.id);
         $('#refinery-select-group').hide();
@@ -679,6 +805,19 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     $('#btn-add-pull').on('click', () => openAddModal(null, null));
+
+    // Plan from a blueprint without leaving the calendar. With none saved, say
+    // so and offer the way to make one rather than opening an empty dialog.
+    $('#btn-plan-blueprint').on('click', function () {
+        if (BlueprintApply.count() === 0) {
+            $('#noBlueprintModal')
+                .appendTo('body')
+                .addClass('mining-manager-wrapper mining-dashboard moon-planner-page')
+                .modal('show');
+            return;
+        }
+        BlueprintApply.open(null);
+    });
     $('.btn-plan-refinery').on('click', function () {
         openAddModal($(this).data('structure-id'), $(this).data('projected') || null);
     });
@@ -754,11 +893,28 @@ document.addEventListener('DOMContentLoaded', function () {
         const iso = inputToIso($('#plan-arrival').val());
         if (!iso) { $('#plan-error').show().text('Pick a planned arrival time.'); return; }
 
+        // A pull from a blueprint can take the rest of its moon's pulls with
+        // it. Only worth asking when the time actually moved and there is
+        // something later to move.
+        let cascade = 0;
+        // Compared as instants: the value built here and the one the calendar
+        // handed over are the same moment written two different ways.
+        const moved = editingPlan && new Date(iso).getTime() !== new Date(editingPlan.iso).getTime();
+        if (isUpdate && moved && editingPlan.rotation_id && editingPlan.later_in_series > 0) {
+            cascade = confirm(
+                'This pull comes from a blueprint and has ' + editingPlan.later_in_series +
+                ' later pull(s) for this moon.\n\n' +
+                'OK: move those by the same amount, keeping the pattern.\n' +
+                'Cancel: move only this one.'
+            ) ? 1 : 0;
+        }
+
         const payload = {
             structure_id: $('#plan-structure-id').val(),
             planned_arrival_time: iso,
             notes: $('#plan-notes').val(),
             confirmed: confirmed ? 1 : 0,
+            cascade: cascade,
         };
         pendingPayload = { payload, isUpdate, planId };
 
@@ -803,11 +959,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
     $('#btn-delete-plan').on('click', function () {
         const id = $(this).data('id');
-        if (!confirm('Remove this planned pull?')) return;
+        let cascade = 0;
+
+        if (editingPlan && editingPlan.rotation_id && editingPlan.later_in_series > 0) {
+            const answer = confirm(
+                'This pull comes from a blueprint and has ' + editingPlan.later_in_series +
+                ' later pull(s) for this moon.\n\n' +
+                'OK: remove this one and those.\n' +
+                'Cancel: remove only this one.'
+            );
+            cascade = answer ? 1 : 0;
+        } else if (!confirm('Remove this planned pull?')) {
+            return;
+        }
+
         $.ajax({
             url: routes.destroy + '/' + id,
             method: 'DELETE',
-            data: { _token: CSRF },
+            data: { _token: CSRF, cascade: cascade },
         }).done(() => window.location.reload()).fail(() => alert('Delete failed.'));
     });
 });

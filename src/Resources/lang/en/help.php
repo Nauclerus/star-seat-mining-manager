@@ -246,8 +246,8 @@ return [
     'tax_rate_regular_ore' => 'Regular Ore — A single rate applied to all non-moon, non-ice, non-gas ores (Veldspar, Scordite, Plagioclase, etc.).',
     'tax_rate_ice' => 'Ice — Applied to all ice mining products.',
     'tax_rate_gas' => 'Gas — Applied to all gas cloud harvesting.',
-    'tax_rate_abyssal' => 'Abyssal Ore — Applied to rare ores from Abyssal Deadspace (Bezdnacine, Rakovene, Talassonite). Disabled by default in the Tax Selector.',
-    'tax_rate_triglavian' => 'Triglavian Ore — Applied to ores from Pochven/Triglavian space (Banidine, Augumene, Mercium, Lyavite, Pithix, Green Arisite, Oeryl, Geodite, Polygypsum). Disabled by default in the Tax Selector.',
+    'tax_rate_abyssal' => 'Abyssal Ore: Bezdnacine, Rakovene and Talassonite, every grade and compressed form. Nullsec and wormhole border ore, including Ore Prospecting Array escalations. Disabled by default in the Tax Selector.',
+    'tax_rate_triglavian' => 'Triglavian Ore: mission and site objective ore (Banidine, Augumene, Mercium, Lyavite, Pithix, Green Arisite, Oeryl, Geodite, Polygypsum). None of it can be sold or reprocessed, so this rate never charges anything. Disabled by default in the Tax Selector.',
 
     // Tax Selector
     'tax_selector_explained' => 'Tax Selector (What Gets Taxed)',
@@ -377,7 +377,7 @@ return [
     'moon_tracking' => 'Tracking Moon Extractions',
     'moon_tracking_desc' => 'The system automatically tracks all moon extraction activities from your structures. View extraction history, active extractions, completion progress, and structure names.',
     'moon_compositions' => 'Moon Compositions',
-    'moon_compositions_desc' => 'Record and analyze the ore composition of each moon. View ore percentages, rarity classification (R4-R64), and estimated extraction values based on current market prices.',
+    'moon_compositions_desc' => 'A moon\'s ore comes from its scan in SeAT\'s Moons Reporter: the percentages, the rarity (R4 to R64) and an estimated value at current market prices. A moon nobody has scanned is still valued, from the game\'s own extraction notices, once the first one is in. Its extraction page says so in an amber banner, and the simulator, Find Moons and the quality ratings cannot see it until it is scanned. Moon Scan Missing, in the Plugin Health group on the webhook form, lists the moons your refineries drill that need a scan.',
     'extraction_notifications' => 'Extraction Notifications',
     'extraction_notifications_desc' => 'A moon-arrival notification fires once, the moment a chunk actually becomes minable (within ~60s of arrival time). Enable / disable per channel and configure target webhooks under Settings → Notifications — the "moon_arrival" event type controls the master toggle, role ping, and per-webhook subscriptions.',
     'moon_value' => 'Moon Value Calculator',
@@ -389,9 +389,9 @@ return [
     'moon_status_extracting' => 'Extracting',
     'moon_status_extracting_desc' => 'The moon drill beam is active, forming a chunk. Duration depends on extraction settings (typically 6-56 days).',
     'moon_status_ready' => 'Ready',
-    'moon_status_ready_desc' => 'The chunk has fractured and an asteroid belt is available for mining. Belt lasts approximately 48 hours.',
+    'moon_status_ready_desc' => 'The chunk has fractured and an asteroid belt is available for mining. It can be mined for 48 hours after fracture, or 72 / 96 hours when the refinery has a Moon Drilling Stability or Proficiency rig.',
     'moon_status_unstable' => 'Unstable',
-    'moon_status_unstable_desc' => 'Belt is degrading and will expire soon (48-50 hours after fracture). Mining should be prioritized.',
+    'moon_status_unstable_desc' => 'The last 2 hours of the belt\'s life, after its mining window: 48 to 50 hours after fracture, later with a moon rig. Mining should be prioritized.',
     'moon_status_expired' => 'Expired',
     'moon_status_expired_desc' => 'Belt has despawned. No further mining possible until next extraction cycle.',
 
@@ -463,6 +463,7 @@ return [
     'moon_analytics_utilization' => 'Moon Utilization - Track how much of each extraction pool is actually mined, with structure names and completion percentages.',
     'moon_analytics_pool_vs_mined' => 'Pool vs Mined - Compare what was available in each extraction against what was actually mined, broken down by ore type.',
     'moon_analytics_per_extraction' => 'Per-Extraction Analysis - Detailed view of individual extractions showing pool composition, mining activity, unique miners, and ISK values.',
+    'moon_analytics_rigs' => 'Moon Rigs - A cog marks refineries with moon rigs fitted now, and the chunks that were pulled with them. Hover it to see which rigs and what they did to each chunk.',
     'moon_analytics_popularity' => 'Ore Popularity - Track which ores are most frequently mined across all moon extractions.',
 
     'exporting_data' => 'Exporting Data',
@@ -652,6 +653,7 @@ return [
     'cli_test_desc' => 'Commands for generating test data. Only use in development environments — they create fake data:',
 
     // Schedule Labels
+    'schedule_1min' => 'Every minute',
     'schedule_30min' => 'Every 30 min',
     'schedule_2hours' => 'Every 2 hours',
     'schedule_4hours' => 'Every 4 hours',
@@ -681,22 +683,22 @@ return [
     'pay_step_2' => 'Every day, the system calculates the value of what you mined and how much tax you owe based on the ore type and corporation tax rates. This is stored as a daily summary.',
     'pay_step_3' => 'At the end of the tax period (monthly, biweekly, or weekly — depends on your corp settings), all your daily totals are added up into one tax bill.',
     'pay_step_4' => 'You receive a notification (Discord or Slack depending on corp setup) with your tax amount and a link to the Tax page.',
-    'pay_step_5' => 'Go to Mining Manager > My Taxes to see your bill. You will see the amount owed, due date, and your unique tax code (e.g. TAX-A1B2C3).',
+    'pay_step_5' => 'Go to Mining Manager > My Taxes to see your bill. You will see what is left to pay, the due date and how many days you have, and your unique tax code (e.g. TAX-A1B2C3). While you owe anything, a banner at the top of the Mining Dashboard says how much and when it is due.',
     'pay_step_6' => 'Pay your corporation in game (right-click its name and choose "Give Money") with your tax code in the "reason" field. That is how the system matches your payment to your bill.',
     'pay_step_7' => 'The system automatically scans wallet transactions every 6 hours. Once it finds your payment with the matching tax code, your status changes to "Paid". Done!',
 
     'pay_ingame_title' => 'How to Send Payment In-Game',
     'pay_ingame_step_1' => 'In EVE Online, right-click your corporation\'s name and choose "Give Money". "Give ISK" in your own wallet can\'t send to a corporation.',
-    'pay_ingame_step_4' => 'Enter the exact amount shown on your tax bill (or a partial amount if paying in installments).',
+    'pay_ingame_step_4' => 'Enter the amount shown in the payment steps on My Taxes, or part of it if you are paying in instalments. After a part payment it shows only what is left.',
     'pay_ingame_step_5' => 'In the "Reason" field, paste your tax code exactly as shown (e.g. TAX-A1B2C3). This is the most important step — without the code, the system cannot match your payment.',
 
     'pay_reason_warning' => 'The tax code MUST be in the "Reason" field of the wallet transfer, not the description or anywhere else. If you forget the code or type it wrong, your payment will not be automatically matched and a director will need to manually verify it.',
 
     'pay_partial_title' => 'Can I Pay in Installments?',
-    'pay_partial_desc' => 'Yes. You can split your payment into multiple transfers using the same tax code each time. For example, if you owe 100M ISK, you can send 50M now and 50M later — both with the same tax code. The system tracks partial payments and updates your status accordingly (Partial → Paid once the full amount is received).',
+    'pay_partial_desc' => 'Yes. You can split your payment into several transfers using the same tax code each time. For example, if you owe 100M ISK, you can send 50M now and 50M later, both with the same tax code. Your status shows Partial until the full amount is in, then Paid. My Taxes keeps the payment steps and your tax code on screen until then, and asks only for what is left.',
 
     'pay_verification_title' => 'How Do I Know My Payment Went Through?',
-    'pay_verification_desc' => 'Go to Mining Manager > My Taxes. Your tax status will update automatically: "Unpaid" means no payment detected yet, "Partial" means some amount received but not the full bill, "Paid" means you are all clear. The Wallet Verification page also shows your payment history. Payments are scanned every 6 hours, so it may take up to 6 hours for your status to update.',
+    'pay_verification_desc' => 'Go to Mining Manager > My Taxes. Your tax status will update automatically: "Unpaid" means no payment detected yet, "Partial" means some amount received but not the full bill, "Paid" means you are all clear. The banner on the Mining Dashboard goes once the bill is paid in full. The Wallet Verification page also shows your payment history. Payments are scanned every 6 hours, so it may take up to 6 hours for your status to update.',
 
     'pay_tip' => 'If you have alt characters linked to your SeAT account, all their mining is combined into one tax bill under your main character. You only need to pay once for all your alts.',
 
@@ -772,7 +774,7 @@ return [
     'webhook_cat_theft' => 'Theft',
     'webhook_cat_theft_events' => 'Theft Detected, Critical Theft, Active Theft, Incident Resolved',
     'webhook_cat_moon' => 'Moon',
-    'webhook_cat_moon_events' => 'Moon Arrival (extraction ready), Jackpot Detected, Moon Chunk Unstable (capital-pilots safety warning fired ~2h before the chunk enters the unstable phase), Extraction Started (a refinery started an extraction, naming who started it), Next Extraction Planned (the refinery\'s next planned pull, once a chunk is ready), Moon Scheduled Off-Plan (an extraction set in game away from the planned time)',
+    'webhook_cat_moon_events' => 'Moon Arrival (extraction ready), Jackpot Detected, Moon Chunk Unstable (capital-pilots safety warning fired ~2h before the chunk enters the unstable phase), Extraction Started (a refinery started an extraction, naming who started it), Next Extraction Planned (the refinery\'s next planned pull, once a chunk is ready), Moon Scheduled Off-Plan (an extraction set in game away from the planned time), Refinery Gone (planned pulls taken off a refinery the corporation no longer owns), Moon Extraction Cancelled, Moon Not Rescheduled (a drill left idle after its chunk arrived), Moons Need Planning (one list of refineries short of planned pulls)',
     'webhook_cat_structure_alerts' => 'Structure Alerts (cross-plugin)',
     'webhook_cat_structure_alerts_events' => 'Extraction At Risk (fuel critical or shield/armor/hull reinforced), Extraction Lost (refinery destroyed). Requires Manager Core + Structure Manager — toggles auto-disable when either plugin is missing. SM publishes the events; MM dispatches notifications with attacker info, system security, fuel/timer details, and a one-click Structure Board deeplink.',
     'webhook_cat_events' => 'Mining Events',
@@ -781,6 +783,8 @@ return [
     'webhook_cat_tax_events' => 'Tax Generated (broadcast), Tax Announcement (broadcast: new invoices notification without ISK amounts), Tax Reminder (personal), Tax Invoice (personal), Tax Overdue (personal), Outstanding Mining Tax (weekly digest for directors of who still owes)',
     'webhook_cat_reports' => 'Reports',
     'webhook_cat_reports_events' => 'Report Generated (when a scheduled report completes)',
+    'webhook_cat_health' => 'Plugin Health',
+    'webhook_cat_health_events' => 'Price Provider Trouble (price refreshes started failing, or work again), Moon Scan Missing (moons your refineries drill with no scan in SeAT, valued from the game\'s notices until they are scanned; once per new reason, and daily as well if you switch that on)',
 
     'webhook_role_ping_title' => 'Discord Role Pinging',
     'webhook_role_ping_desc' => 'Role pinging is configured per notification type on the Notifications tab. Each notification type has its own "Ping Role" toggle and "Role ID" field, allowing you to ping different roles for different events (e.g., @officers for theft alerts, @miners for event announcements). Personal tax notifications (reminder, invoice, overdue) can optionally ping individual Discord users via seat-connector instead of a role. The "Show ISK Amount" toggle controls whether tax amounts are visible in notifications — disable this for privacy if the notification channel is public.',

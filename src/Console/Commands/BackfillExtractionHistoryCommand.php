@@ -10,8 +10,8 @@ use Carbon\Carbon;
 use Symfony\Component\Yaml\Yaml;
 use MiningManager\Models\MoonExtraction;
 use MiningManager\Models\MoonExtractionHistory;
+use MiningManager\Services\Moon\MoonDrillingRigs;
 use MiningManager\Models\MiningLedger;
-use MiningManager\Services\Moon\StructureMoonRigs;
 
 /**
  * Backfill moon_extraction_history from EVE character notifications.
@@ -576,23 +576,27 @@ class BackfillExtractionHistoryCommand extends Command
      *
      * Timing note: in EVE, chunk_arrival_time is when the chunk is
      * ready to fracture. natural_decay_time in the plugin's data is
-     * the AUTO-FRACTURE time (3 hours after chunk arrival, extended by
-     * the rig). AFTER fracture (manual or auto), the ore exists as
-     * minable belt roids for 48-96 hours (rig dependent) before
-     * despawning. So the real mining window is roughly:
+     * the AUTO-FRACTURE time (3 hours after chunk arrival, longer with a
+     * moon rig). AFTER fracture (manual or auto), the ore exists as
+     * minable belt roids for 48 hours (72 / 96 with a moon rig), then
+     * 2 more unstable. So with no rig the real mining window is roughly:
      *
-     *   readyTime  →  autoTime + lifetime
+     *   readyTime  →  autoTime + 48h + 2h  ≈  readyTime + 53h
      *
-     * We use the structure's own rig-aware lifetime plus a small buffer,
-     * with a 72-hour floor, to be conservative and catch stragglers who
-     * mine just before despawn. The mining_ledger `date` column is
-     * date-only (no time), so we compare against date strings covering
-     * the full calendar days of the window.
+     * We use a 72-hour window from readyTime to be conservative and
+     * catch stragglers who mine just before despawn, stretched to the
+     * chunk's own end when a Stability or Proficiency rig gave it longer. The mining_ledger
+     * `date` column is date-only (no time), so we compare against
+     * date strings covering the full calendar days of the window.
      */
     private function calculateActualMined(int $structureId, Carbon $readyTime, Carbon $decayTime): array
     {
-        $lifetimeHours = StructureMoonRigs::forStructure($structureId)['lifetime_hours'];
-        $windowEnd = $readyTime->copy()->addHours(max(72, $lifetimeHours + 6));
+        $windowEnd = $readyTime->copy()->addHours(72);
+        $tier = MoonDrillingRigs::timerTier($readyTime, $decayTime) ?? 0;
+        $chunkEnd = $decayTime->copy()->addHours(MoonDrillingRigs::readyHours($tier) + MoonDrillingRigs::UNSTABLE_HOURS);
+        if ($chunkEnd->gt($windowEnd)) {
+            $windowEnd = $chunkEnd;
+        }
 
         $entries = MiningLedger::where('observer_id', $structureId)
             ->where('date', '>=', $readyTime->toDateString())

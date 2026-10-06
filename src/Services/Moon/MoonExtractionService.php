@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Carbon\Carbon;
+use Illuminate\Database\QueryException;
 use Symfony\Component\Yaml\Yaml;
 
 class MoonExtractionService
@@ -133,7 +134,9 @@ class MoonExtractionService
                 $oreComposition = $this->getMoonComposition(
                     $extraction->moon_id,
                     $extraction->structure_id,
-                    $extraction->extraction_start_time
+                    $extraction->extraction_start_time,
+                    $extraction->chunk_arrival_time,
+                    $extraction->natural_decay_time
                 );
 
                 $extractionData[] = [
@@ -159,17 +162,24 @@ class MoonExtractionService
     }
 
     /**
-     * Get actual ore volumes from MoonminingExtractionStarted notification.
+     * Get actual ore volumes from the game's own notices.
      * This provides the REAL chunk volumes, not estimated from percentages.
+     *
+     * Four notices carry them: Extraction Started when the drill is lit,
+     * Extraction Finished when the chunk arrives, and Laser Fired or Automatic
+     * Fracture when it breaks. The newest one wins. Whatever happened to the
+     * refinery in between, a yield rig fitted or taken off included, the latest
+     * notice is the game's own count of what is in the chunk, so the values and
+     * Analytics follow it rather than the figure from when it was started.
      *
      * @param int $structureId
      * @param string $extractionStartTime
      * @return array|null Array of [type_id => volume_in_m3]
      */
-    private function getActualOreVolumesFromNotification(int $structureId, string $extractionStartTime): ?array
+    private function getActualOreVolumesFromNotification(int $structureId, string $extractionStartTime, $chunkArrivalTime = null, $naturalDecayTime = null): ?array
     {
         try {
-            $notification = $this->findExtractionStartedNotification($structureId, $extractionStartTime);
+            $notification = $this->latestVolumeNotice($structureId, $extractionStartTime, $chunkArrivalTime, $naturalDecayTime);
 
             if (!$notification) {
                 Log::debug("Mining Manager: No notification found for structure {$structureId} at {$extractionStartTime}");
@@ -207,6 +217,130 @@ class MoonExtractionService
             Log::error("Mining Manager: Error fetching notification data for structure {$structureId}: " . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Notices after Extraction Started that carry the chunk's ore volumes.
+     */
+    private const LATER_VOLUME_NOTICES = [
+        'MoonminingExtractionFinished',
+        'MoonminingLaserFired',
+        'MoonminingAutomaticFracture',
+    ];
+
+    /**
+     * What each volume notice is called on the extraction page.
+     */
+    public const VOLUME_NOTICE_LABELS = [
+        'MoonminingExtractionStarted' => 'Extraction started',
+        'MoonminingExtractionFinished' => 'Chunk arrived',
+        'MoonminingLaserFired' => 'Laser fired',
+        'MoonminingAutomaticFracture' => 'Fractured on its own',
+    ];
+
+    /**
+     * The newest notice carrying this extraction's ore volumes: one from the
+     * chunk's arrival or fracture once it has arrived, otherwise the one from
+     * when it was started.
+     */
+    private function latestVolumeNotice(int $structureId, $extractionStartTime, $chunkArrivalTime = null, $naturalDecayTime = null): ?object
+    {
+        $later = $this->laterVolumeNotices($structureId, $chunkArrivalTime, $naturalDecayTime);
+
+        return $later ? end($later) : $this->findExtractionStartedNotification($structureId, $extractionStartTime);
+    }
+
+    /**
+     * Finished, Laser Fired and Automatic Fracture notices for one chunk,
+     * oldest first: from a few minutes before it arrived to an hour after it
+     * would fracture on its own. Only ones that carry ore volumes, each kind
+     * once, as every character with the role gets their own copy.
+     *
+     * @return array<int, object>
+     */
+    private function laterVolumeNotices(int $structureId, $chunkArrivalTime = null, $naturalDecayTime = null): array
+    {
+        if (!$chunkArrivalTime || Carbon::parse($chunkArrivalTime)->isFuture()) {
+            return [];
+        }
+
+        $arrival = Carbon::parse($chunkArrivalTime);
+        $autoFracture = $naturalDecayTime
+            ? Carbon::parse($naturalDecayTime)
+            : $arrival->copy()->addMinutes(MoonDrillingRigs::autoFractureMinutes(2));
+
+        $rows = DB::table('character_notifications')
+            ->whereIn('type', self::LATER_VOLUME_NOTICES)
+            ->where('text', 'LIKE', '%structureID: ' . $structureId . '%')
+            ->where('timestamp', '>=', $arrival->copy()->subMinutes(5))
+            ->where('timestamp', '<=', $autoFracture->copy()->addHour())
+            ->orderBy('timestamp')
+            ->get(['type', 'text', 'timestamp']);
+
+        $notices = [];
+
+        foreach ($rows as $row) {
+            if (isset($notices[$row->type])
+                || !str_contains((string) $row->text, 'oreVolumeByType')
+                || !StructureNotificationText::mentions((string) $row->text, $structureId)) {
+                continue;
+            }
+
+            $notices[$row->type] = $row;
+        }
+
+        usort($notices, fn ($a, $b) => strcmp((string) $a->timestamp, (string) $b->timestamp));
+
+        return $notices;
+    }
+
+    /**
+     * Every notice that reported this extraction's ore volumes, oldest first,
+     * with its total, so the extraction page can show where the figures came
+     * from and whether the game's count changed along the way.
+     *
+     * @param \MiningManager\Models\MoonExtraction|\MiningManager\Models\MoonExtractionHistory $extraction
+     * @return array<int, array{type: string, label: string, at: Carbon, total_m3: float}>
+     */
+    public function volumeChecks($extraction): array
+    {
+        if (!$extraction->structure_id || !$extraction->extraction_start_time) {
+            return [];
+        }
+
+        try {
+            $notices = array_filter(array_merge(
+                [$this->findExtractionStartedNotification((int) $extraction->structure_id, $extraction->extraction_start_time)],
+                $this->laterVolumeNotices((int) $extraction->structure_id, $extraction->chunk_arrival_time, $extraction->natural_decay_time)
+            ));
+        } catch (\Throwable $e) {
+            Log::debug("Mining Manager: could not read volume notices for extraction {$extraction->id}: " . $e->getMessage());
+
+            return [];
+        }
+
+        $checks = [];
+
+        foreach ($notices as $notice) {
+            try {
+                $volumes = Yaml::parse((string) $notice->text)['oreVolumeByType'] ?? null;
+            } catch (\Throwable $e) {
+                $volumes = null;
+            }
+
+            if (!is_array($volumes)) {
+                continue;
+            }
+
+            $checks[] = [
+                'type' => $notice->type,
+                'label' => self::VOLUME_NOTICE_LABELS[$notice->type] ?? $notice->type,
+                'at' => Carbon::parse($notice->timestamp),
+                'total_m3' => (float) array_sum(array_map('floatval', $volumes)),
+            ];
+        }
+
+        return $checks;
     }
 
     /**
@@ -286,33 +420,38 @@ class MoonExtractionService
      * @param string|null $extractionStartTime Optional extraction start time to find notification
      * @return array|null
      */
-    private function getMoonComposition(int $moonId, ?int $structureId = null, ?string $extractionStartTime = null): ?array
+    private function getMoonComposition(int $moonId, ?int $structureId = null, ?string $extractionStartTime = null, $chunkArrivalTime = null, $naturalDecayTime = null): ?array
     {
         try {
             // Try to get actual volumes from notification first (most accurate)
             $actualVolumes = null;
             if ($structureId && $extractionStartTime) {
-                $actualVolumes = $this->getActualOreVolumesFromNotification($structureId, $extractionStartTime);
+                $actualVolumes = $this->getActualOreVolumesFromNotification($structureId, $extractionStartTime, $chunkArrivalTime, $naturalDecayTime);
             }
 
-            // Check if universe_moon_contents table exists
-            if (!Schema::hasTable('universe_moon_contents')) {
-                Log::debug("Mining Manager: universe_moon_contents table not found");
-                return null;
+            // The moon's scan gives each ore's share of the chunk.
+            $contents = Schema::hasTable('universe_moon_contents')
+                ? DB::table('universe_moon_contents')->where('moon_id', $moonId)->get()->all()
+                : [];
+
+            // The game's notice lists every ore in the chunk with its volume, so
+            // a moon nobody scanned into SeAT, or an ore its scan misses, still
+            // gets a line: the notice's own share stands in for the scan's rate.
+            $scanned = array_map(fn ($content) => (int) $content->type_id, $contents);
+            $noticeTotal = $actualVolumes ? array_sum($actualVolumes) : 0;
+            foreach ((array) $actualVolumes as $typeId => $volume) {
+                if ($noticeTotal > 0 && !in_array((int) $typeId, $scanned, true)) {
+                    $contents[] = (object) ['type_id' => (int) $typeId, 'rate' => $volume / $noticeTotal];
+                }
             }
 
-            // Get moon composition percentages
-            $contents = DB::table('universe_moon_contents')
-                ->where('moon_id', $moonId)
-                ->get();
-
-            if ($contents->isEmpty()) {
-                Log::debug("Mining Manager: No composition data found for moon {$moonId} - moon not scanned");
+            if (!$contents) {
+                Log::debug("Mining Manager: No composition for moon {$moonId}: not scanned, and no notice with its ore yet");
                 return null;
             }
 
             // Batch-load all ore type data to avoid N+1 queries
-            $typeIds = $contents->pluck('type_id')->unique()->toArray();
+            $typeIds = array_values(array_unique(array_map(fn ($content) => (int) $content->type_id, $contents)));
             $oreTypes = DB::table('invTypes')
                 ->whereIn('typeID', $typeIds)
                 ->get()
@@ -396,7 +535,7 @@ class MoonExtractionService
                 'moon_id' => $matchingData['moon_id'],
                 'chunk_arrival_time' => $matchingData['chunk_arrival_time'],
                 'natural_decay_time' => $matchingData['natural_decay_time'],
-                'status' => $this->determineStatus($matchingData, $extraction),
+                'status' => $this->determineStatus($matchingData),
                 'updated_at' => Carbon::now(),
             ]);
 
@@ -492,7 +631,7 @@ class MoonExtractionService
      * @param CorporationStructure $structure
      * @return array
      */
-    private function updateStructureExtractions(CorporationStructure $structure): array
+    public function updateStructureExtractions(CorporationStructure $structure): array
     {
         $extractionData = $this->fetchExtractionData($structure->structure_id);
 
@@ -502,24 +641,20 @@ class MoonExtractionService
 
         $updated = 0;
         $created = 0;
+        $refineries = app(RefineryService::class);
 
-        // Resolve the structure's moon-rig bonuses once: the belt lifetime and
-        // auto-fracture delay it gives every chunk the refinery pulls up.
-        $rigs = StructureMoonRigs::forStructure((int) $structure->structure_id);
-
-        DB::transaction(function () use ($structure, $extractionData, $rigs, &$updated, &$created) {
+        DB::transaction(function () use ($structure, $extractionData, $refineries, &$updated, &$created) {
             foreach ($extractionData as $data) {
-                // Stamp the rig-aware window onto the payload so determineStatus()
-                // and the persisted row use the same lifetime.
-                $data['chunk_lifetime_hours'] = $rigs['lifetime_hours'];
-                $data['auto_fracture_delay_minutes'] = $rigs['auto_fracture_minutes'];
+                // The rigs a chunk is pulled with are looked at until it
+                // arrives; after that the chunk is what it is.
+                $onItsWay = Carbon::parse($data['chunk_arrival_time'])->isFuture();
 
                 $existing = MoonExtraction::where('structure_id', $structure->structure_id)
                     ->where('extraction_start_time', $data['extraction_start_time'])
                     ->first();
 
                 if ($existing) {
-                    $updates = [
+                    $existing->update([
                         'chunk_arrival_time' => $data['chunk_arrival_time'],
                         'natural_decay_time' => $data['natural_decay_time'],
                         // Pass $existing so determineStatus() can read
@@ -532,16 +667,13 @@ class MoonExtractionService
                         'status' => $this->determineStatus($data, $existing),
                         'moon_id' => $data['moon_id'] ?? null,
                         'ore_composition' => $data['ore_composition'] ?? null,
-                    ];
+                    ]);
 
-                    // The in-game decay timer is fixed at fracture, so only
-                    // refresh the window while the chunk is still intact.
-                    if (!$existing->fractured_at) {
-                        $updates['chunk_lifetime_hours'] = $rigs['lifetime_hours'];
-                        $updates['auto_fracture_delay_minutes'] = $rigs['auto_fracture_minutes'];
+                    if ($onItsWay) {
+                        $existing->update([
+                            'moon_rigs' => $refineries->rigSnapshot((int) $structure->structure_id, $existing->moon_rigs),
+                        ]);
                     }
-
-                    $existing->update($updates);
 
                     if (isset($data['ore_composition'])) {
                         $existing->update([
@@ -551,18 +683,28 @@ class MoonExtractionService
 
                     $updated++;
                 } else {
-                    $extraction = MoonExtraction::create([
-                        'structure_id' => $structure->structure_id,
-                        'corporation_id' => $structure->corporation_id,
-                        'moon_id' => $data['moon_id'] ?? null,
-                        'extraction_start_time' => $data['extraction_start_time'],
-                        'chunk_arrival_time' => $data['chunk_arrival_time'],
-                        'natural_decay_time' => $data['natural_decay_time'],
-                        'status' => $this->determineStatus($data),
-                        'ore_composition' => $data['ore_composition'] ?? null,
-                        'chunk_lifetime_hours' => $rigs['lifetime_hours'],
-                        'auto_fracture_delay_minutes' => $rigs['auto_fracture_minutes'],
-                    ]);
+                    // Another run can create the same row between the lookup
+                    // and here; the unique key on structure and start time
+                    // catches it, and that run's row stands.
+                    try {
+                        $extraction = MoonExtraction::create([
+                            'structure_id' => $structure->structure_id,
+                            'corporation_id' => $structure->corporation_id,
+                            'moon_id' => $data['moon_id'] ?? null,
+                            'extraction_start_time' => $data['extraction_start_time'],
+                            'chunk_arrival_time' => $data['chunk_arrival_time'],
+                            'natural_decay_time' => $data['natural_decay_time'],
+                            'status' => $this->determineStatus($data),
+                            'ore_composition' => $data['ore_composition'] ?? null,
+                            'moon_rigs' => $refineries->rigSnapshot((int) $structure->structure_id),
+                        ]);
+                    } catch (QueryException $e) {
+                        if (str_contains($e->getMessage(), 'Duplicate entry') || $e->getCode() === '23000') {
+                            continue;
+                        }
+
+                        throw $e;
+                    }
 
                     if (isset($data['ore_composition'])) {
                         $extraction->update([
@@ -579,20 +721,64 @@ class MoonExtractionService
     }
 
     /**
+     * Read one extraction's ore again from the newest notice and price it now.
+     *
+     * The import does this for every extraction on each run. This is for the
+     * moments that should not wait for the next run: the chunk arriving, and
+     * the chunk being fractured by the laser or on its own, each of which
+     * brings a notice with the game's latest count.
+     *
+     * Never throws: the arrival notification and fracture detection that call
+     * it must carry on whatever happens to the pricing.
+     */
+    public function refreshChunk(MoonExtraction $extraction): bool
+    {
+        if (!$extraction->moon_id || !$extraction->extraction_start_time) {
+            return false;
+        }
+
+        try {
+            $composition = $this->getMoonComposition(
+                (int) $extraction->moon_id,
+                (int) $extraction->structure_id,
+                $extraction->extraction_start_time->format('Y-m-d H:i:s'),
+                $extraction->chunk_arrival_time,
+                $extraction->natural_decay_time
+            );
+
+            if ($composition === null) {
+                return false;
+            }
+
+            $extraction->ore_composition = $composition;
+            $extraction->update([
+                'ore_composition' => $composition,
+                'estimated_value' => $this->valueService->calculateExtractionValue($extraction, true),
+                'value_last_updated' => Carbon::now(),
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            Log::warning("Mining Manager: could not refresh the ore and value of extraction {$extraction->id}: " . $e->getMessage());
+
+            return false;
+        }
+    }
+
+    /**
      * Determine the persisted `status` value for a moon_extractions row,
      * based on the chunk's lifecycle position.
      *
-     * IMPORTANT LIFECYCLE NOTE:
+     * IMPORTANT LIFECYCLE NOTE (fixed 2026-05-31):
      *   `natural_decay_time` is the **auto-fracture mark** (~3h after
-     *   chunk_arrival_time, extended by the rig), NOT the end of the chunk's
-     *   life. The actual mineable window is:
+     *   chunk_arrival_time), NOT the end of the chunk's life.
+     *   The actual mineable window is:
      *     chunk_arrival_time → fractured_at (manual or auto)
-     *     fractured_at → fractured_at + lifetime - 2h  (ready window)
-     *     fractured_at + lifetime - 2h → fractured_at + lifetime  (unstable)
-     *     fractured_at + lifetime → expired
-     *   where lifetime is the structure's rig-aware belt lifetime (48 h base,
-     *   72 h with a Stability/Proficiency I rig, 96 h with a II). So the chunk
-     *   has 48-96 hours of life from fracture, not from arrival.
+     *     fractured_at → fractured_at + 48h  (ready window; 72h or 96h
+     *       with a Stability or Proficiency rig, read from the chunk's timers)
+     *     then 2h unstable → expired
+     *   So the chunk has 50 hours of life from fracture (74 / 98 rigged),
+     *   not from arrival.
      *
      * The previous implementation treated `natural_decay_time` itself as
      * the expiry point, which flipped every chunk to `status='expired'`
@@ -608,8 +794,8 @@ class MoonExtractionService
      * `MoonminingLaserFired` / `MoonminingAutomaticFracture` ESI
      * notifications), and falls back to `natural_decay_time` as a
      * conservative auto-fracture estimate when fractured_at isn't yet
-     * known. Either way the fracture + the row's belt lifetime is the
-     * canonical end of life.
+     * known. Either way fracture + the mining window + 2h is the canonical
+     * end of life.
      *
      * @param array $data       Fresh ESI payload (chunk_arrival_time,
      *                          natural_decay_time, etc.)
@@ -620,6 +806,13 @@ class MoonExtractionService
      */
     public function determineStatus(array $data, ?MoonExtraction $existing = null): string
     {
+        // Cancelled is final. SeAT keeps the extraction row after the game
+        // drops it, so a re-import must not bring it back to life and set off
+        // the cancellation notification all over again.
+        if ($existing && $existing->status === 'cancelled') {
+            return 'cancelled';
+        }
+
         $now = Carbon::now();
         $chunkArrival = Carbon::parse($data['chunk_arrival_time']);
 
@@ -636,33 +829,22 @@ class MoonExtractionService
             ? $existing->fractured_at
             : Carbon::parse($data['natural_decay_time']);
 
-        // Total belt lifetime after fracture comes from the structure's fitted
-        // moon drilling rig (48 h base, up to 96 h with a T2 stability rig).
-        // Prefer the fresh payload value, then the persisted row, then base.
-        $lifetimeHours = (int) ($data['chunk_lifetime_hours'] ?? $existing?->chunk_lifetime_hours ?? 48);
-        if ($lifetimeHours <= 0) {
-            $lifetimeHours = 48;
-        }
-
-        $expiryTime = $fractureTime->copy()->addHours($lifetimeHours);
+        // The mining window, 48 hours or stretched by the chunk's rig, then the
+        // 2 hour unstable tail. The rig comes from the chunk's own timers.
+        $tier = MoonDrillingRigs::timerTier($data['chunk_arrival_time'], $data['natural_decay_time'] ?? null)
+            ?? ($existing ? $existing->timerRigTier() : 0);
+        $expiryTime = $fractureTime->copy()->addHours(MoonDrillingRigs::readyHours($tier) + MoonDrillingRigs::UNSTABLE_HOURS);
 
         return $now < $expiryTime ? 'ready' : 'expired';
     }
 
-    /**
-     * Detect auto-fractured extractions by scanning EVE notifications.
-     * When EVE auto-fractures a moon (no player fired the laser), a
-     * MoonminingAutoFracture notification is generated. This extends
-     * the ready window from 48h to 51h.
-     *
-     * @return int Number of auto-fractures detected
-     */
     /**
      * Detect fracture events from ESI notifications.
      *
      * Checks for both:
      * - MoonminingLaserFired: player manually fired the laser
      * - MoonminingAutomaticFracture: no one fired, EVE auto-fractured after 3h
+     *   (3h 36m / 3h 43m with a moon rig)
      *
      * Sets fractured_at timestamp and fractured_by (player name for manual).
      */
@@ -694,6 +876,7 @@ class MoonExtractionService
                 $extraction->auto_fractured = false;
                 $extraction->status = 'ready';
                 $extraction->save();
+                $this->refreshChunk($extraction);
                 $detected++;
                 Log::info("Mining Manager: Manual fracture detected for extraction {$extraction->id} at structure {$extraction->structure_id}" .
                     ($firedBy ? " by {$firedBy}" : ''));
@@ -715,6 +898,7 @@ class MoonExtractionService
                 $extraction->auto_fractured = true;
                 $extraction->status = 'ready';
                 $extraction->save();
+                $this->refreshChunk($extraction);
                 $detected++;
                 Log::info("Mining Manager: Auto-fracture detected for extraction {$extraction->id} at structure {$extraction->structure_id}");
             }
@@ -774,10 +958,50 @@ class MoonExtractionService
                 Log::info("Mining Manager: Extraction {$extraction->id} marked cancelled" .
                     ($cancelledBy ? " (cancelled by {$cancelledBy})" : '') .
                     " based on MoonminingExtractionCancelled notification at {$cancelNotification->timestamp}");
+
+                // The status only ever moves to cancelled once, so this fires once.
+                $this->sendExtractionCancelledNotification($extraction, $cancelledBy);
             }
         }
 
         return $cancelled;
+    }
+
+    /**
+     * Tell the corporation an extraction was stopped before its chunk arrived.
+     *
+     * Same scope as Extraction Started: the Moon Owner Corporation's refineries
+     * only, when one is set. A failure is logged and left there; the
+     * cancellation itself is already recorded.
+     */
+    public function sendExtractionCancelledNotification(MoonExtraction $extraction, ?string $cancelledBy): string
+    {
+        $moonOwner = $this->settingsService->getTaxProgramCorporationId();
+        if ($moonOwner !== null && (int) $extraction->corporation_id !== (int) $moonOwner) {
+            return 'skipped';
+        }
+
+        try {
+            $structureName = DB::table('universe_structures')
+                ->where('structure_id', $extraction->structure_id)
+                ->value('name') ?? "Structure {$extraction->structure_id}";
+
+            app(\MiningManager\Services\Notification\NotificationService::class)->sendExtractionCancelled(array_filter([
+                'moon_name' => $extraction->moon_name ?? 'Unknown Moon',
+                'structure_name' => $structureName,
+                'cancelled_by' => $cancelledBy,
+                'chunk_arrival_time' => $extraction->chunk_arrival_time ? $extraction->chunk_arrival_time->format('Y-m-d H:i') : null,
+                'planner_url' => rtrim(config('app.url', ''), '/') . '/mining-manager/moon/planner',
+            ], fn ($value) => $value !== null));
+
+            Log::info("Mining Manager: fired extraction_cancelled for extraction {$extraction->id}");
+
+            return 'sent';
+        } catch (\Throwable $e) {
+            Log::error("Mining Manager: failed to send extraction_cancelled for extraction {$extraction->id}: " . $e->getMessage());
+
+            return 'failed';
+        }
     }
 
     /**
@@ -813,6 +1037,7 @@ class MoonExtractionService
                 'auto_fractured' => false,
                 'status' => 'ready',
             ]);
+            $this->refreshChunk($extraction);
 
             Log::info("Mining Manager: Manual fracture detected on page load for extraction {$extraction->id}" .
                 ($firedBy ? " by {$firedBy}" : ''));
@@ -835,6 +1060,7 @@ class MoonExtractionService
                 'auto_fractured' => true,
                 'status' => 'ready',
             ]);
+            $this->refreshChunk($extraction);
 
             Log::info("Mining Manager: Auto-fracture detected on page load for extraction {$extraction->id}");
             return true;
@@ -871,7 +1097,8 @@ class MoonExtractionService
                 $q->where('estimated_value', 0)->orWhereNull('estimated_value');
             })
             ->whereNotNull('ore_composition')
-            ->get();
+            ->get()
+            ->filter(fn (MoonExtraction $extraction) => $extraction->isExpired());
 
         foreach ($aboutToExpire as $extraction) {
             try {
@@ -884,8 +1111,8 @@ class MoonExtractionService
             }
         }
 
-        // Mark as expired using fractured_at when available, legacy estimate otherwise
-        $expired = MoonExtraction::expiredByTime()->update(['status' => 'expired']);
+        // Mark as expired: past the chunk's mining window and its unstable tail
+        $expired = MoonExtraction::markExpired();
 
         if ($expired > 0) {
             Log::info("Mining Manager: Marked {$expired} extractions as expired");
@@ -924,24 +1151,42 @@ class MoonExtractionService
             Log::info("Mining Manager: No extractions transitioned to 'ready' this cycle");
         }
 
-        // DIAGNOSTIC: Detect extractions that might have been imported directly as 'ready'
-        // (happens if import cron ran AFTER chunk_arrival_time — skips the transition path).
-        // notification_sent flag is for the hours-before alerts, but we re-use it here to
-        // avoid spamming. If an extraction is ready + recent arrival + never notified,
-        // log a warning so admin can investigate / manually notify.
-        $missedNotifications = MoonExtraction::where('status', 'ready')
-            ->where('chunk_arrival_time', '>=', $now->copy()->subHours(6))
-            ->where('chunk_arrival_time', '<=', $now)
-            ->whereNotIn('id', $readyIds ?? [])
-            ->get();
-
-        if ($missedNotifications->isNotEmpty()) {
-            foreach ($missedNotifications as $missed) {
-                Log::warning("Mining Manager: Extraction {$missed->id} (moon: {$missed->moon_name}) is 'ready' with chunk_arrival_time {$missed->chunk_arrival_time} but did NOT transition from 'extracting' this cycle. May have been imported directly as ready — no notification was fired. Check UpdateMoonExtractionsCommand import logic.");
-            }
-        }
+        $this->warnAboutUnannouncedArrivals($now);
 
         Log::info("Mining Manager: updateExtractionStatuses() finished");
+    }
+
+    /**
+     * Log a warning for chunks that arrived a while ago and still have no
+     * arrival notification.
+     *
+     * The import marks an arrived chunk ready by itself, and the arrival
+     * notification is check-extraction-arrivals' job every minute, so a ready
+     * chunk that did not change state in updateExtractionStatuses() is normal.
+     * One with no notification half an hour after it arrived is not: that
+     * command is not running, or its webhook keeps failing.
+     *
+     * @return int how many were warned about
+     */
+    protected function warnAboutUnannouncedArrivals(Carbon $now): int
+    {
+        $unannounced = MoonExtraction::where('notification_sent', false)
+            ->where('status', '!=', 'cancelled')
+            ->where('chunk_arrival_time', '>=', $now->copy()->subHours(6))
+            ->where('chunk_arrival_time', '<=', $now->copy()->subMinutes(30));
+
+        $moonOwnerCorpId = $this->getMoonOwnerCorporationId();
+        if ($moonOwnerCorpId) {
+            $unannounced->where('corporation_id', $moonOwnerCorpId);
+        }
+
+        $missed = $unannounced->get();
+
+        foreach ($missed as $extraction) {
+            Log::warning("Mining Manager: Extraction {$extraction->id} (moon: {$extraction->moon_name}) arrived at {$extraction->chunk_arrival_time} and its arrival notification has still not gone out. Check that mining-manager:check-extraction-arrivals is running and that its webhook works.");
+        }
+
+        return $missed->count();
     }
 
     /**
@@ -1021,14 +1266,13 @@ class MoonExtractionService
             // format is reused by jackpot_detected notifications too.
             $oreSummary = $extraction->buildOreSummary();
 
-            // Auto-fracture mark. ESI's natural_decay_time is authoritative and
-            // already accounts for the rig's Chunk Stability Bonus; fall back
-            // to the stored delay when it is missing.
+            // When it fractures on its own: EVE's own time, which already
+            // carries the refinery's rig, else 3 hours stretched by it.
             if ($extraction->natural_decay_time) {
                 $autoFractureTime = $extraction->natural_decay_time->format('Y-m-d H:i');
             } elseif ($extraction->chunk_arrival_time) {
                 $autoFractureTime = $extraction->chunk_arrival_time->copy()
-                    ->addMinutes($extraction->getAutoFractureDelayMinutes())
+                    ->addSeconds((int) round($extraction->getAutoFractureDelayMinutes() * 60))
                     ->format('Y-m-d H:i');
             } else {
                 $autoFractureTime = 'Unknown';
@@ -1244,22 +1488,23 @@ class MoonExtractionService
      * Send the "chunk going unstable soon" SAFETY warning for capital pilots.
      *
      * Fired ~2 hours before the chunk enters the plugin's UNSTABLE state
-     * (which is fractured_at + 48h, i.e. the last 2 hours of the 50-hour
-     * post-fracture lifecycle). Unstable chunks attract hostile activity —
+     * (fracture + the chunk's mining window: 48h, or 72 / 96h with a
+     * Stability or Proficiency rig). Unstable chunks attract hostile activity —
      * this gives Rorqual / Orca pilots time to dock up or warp to safety
      * before the situation gets dangerous.
      *
      * IMPORTANT: this uses the PLUGIN's lifecycle model, not raw ESI data.
      * The plugin's lifecycle is richer than CCP's:
      *
-     *     chunk_arrival_time → fractured_at (manual laser fire OR auto +3h)
-     *                       → 48h READY window (stable)
+     *     chunk_arrival_time → fractured_at (manual laser fire OR auto at
+     *                          natural_decay_time)
+     *                       → READY for the mining window (48h, 72h or 96h)
      *                       → 2h UNSTABLE window (getUnstableStartTime())
      *                       → expired
      *
      * The unstable phase is what MoonExtraction::isUnstable() returns true
-     * for. We fire this warning 2h BEFORE that phase starts, which is
-     * fractured_at + 46h (= last 2 hours of the 48h stable window).
+     * for. We fire this warning 2h BEFORE that phase starts, in the last
+     * 2 hours of the mining window.
      *
      * ESI's `natural_decay_time` is the auto-fracture mark (~3h after
      * chunk_arrival), which is much earlier in the lifecycle and NOT the
@@ -1281,7 +1526,7 @@ class MoonExtractionService
         }
 
         // Use the plugin's canonical lifecycle helpers — NOT raw ESI
-        // natural_decay_time. getUnstableStartTime() = fractured_at + 48h,
+        // natural_decay_time. getUnstableStartTime() = fracture + the chunk's mining window,
         // falling back to a chunk_arrival-based estimate if fracture_at
         // isn't populated yet.
         $unstableStart = $extraction->getUnstableStartTime();
@@ -1608,21 +1853,10 @@ class MoonExtractionService
      *
      * @param int $moonId
      * @param int $extractionDays Number of days for extraction (6-56)
-     * @param int|null $structureId The drilling refinery, so its fitted rigs
-     *                              are used when the simulator is on "auto".
-     * @param int|null $efficiencyTier Override the yield rig: 0 none, 1 Tech I,
-     *                                  2 Tech II. Null = use the fitted rig.
-     * @param int|null $stabilityTier  Override the belt-life rig: 0 none,
-     *                                  1 Tech I, 2 Tech II. Null = fitted.
      * @return array|null
      */
-    public function simulateExtraction(
-        int $moonId,
-        int $extractionDays = 14,
-        ?int $structureId = null,
-        ?int $efficiencyTier = null,
-        ?int $stabilityTier = null
-    ): ?array {
+    public function simulateExtraction(int $moonId, int $extractionDays = 14, array $fit = []): ?array
+    {
         if (!Schema::hasTable('universe_moon_contents')) {
             return null;
         }
@@ -1639,31 +1873,13 @@ class MoonExtractionService
             return null;
         }
 
-        // Rig effects. A null tier means "auto": use the refinery on the moon.
-        // An explicit tier simulates a chosen rig instead. Efficiency drives
-        // the yield; stability drives the belt lifetime and auto-fracture.
-        $fitted = $structureId ? StructureMoonRigs::forStructure($structureId) : StructureMoonRigs::base();
-
-        $decayBonus = $stabilityTier === null
-            ? $fitted['decay_bonus']
-            : (StructureMoonRigs::DECAY_BONUS[$stabilityTier] ?? 0.0);
-        $stabilityBonus = $stabilityTier === null
-            ? $fitted['stability_bonus']
-            : (StructureMoonRigs::STABILITY_BONUS[$stabilityTier] ?? 0.0);
-        $yieldBonus = $efficiencyTier === null
-            ? $fitted['yield_bonus']
-            : (StructureMoonRigs::EFFICIENCY_BONUS[$efficiencyTier] ?? 0.0);
-
-        $rigs = StructureMoonRigs::compose(
-            $decayBonus,
-            $stabilityBonus,
-            $yieldBonus,
-            $fitted['rig_name'] ?? null,
-            ($efficiencyTier === null && $stabilityTier === null) ? 'fitted' : 'manual'
-        );
+        // The refinery and its moon rigs. An Athanor takes Efficiency for the
+        // yield and Stability for the timers; a Tatara gets both from one
+        // Proficiency rig.
+        $rig = $this->simulatedRig($fit);
 
         $valuation = app(MoonValuation::class);
-        $valued = $valuation->value($ores, $extractionDays, $rigs['yield_multiplier']);
+        $valued = $valuation->value($ores, $extractionDays, $rig['yield_bonus']);
 
         $moonOreShare = 0.0;
         foreach ($ores as $typeId => $oreShare) {
@@ -1714,17 +1930,51 @@ class MoonExtractionService
             'prices_updated_at' => $valuation->pricesUpdatedAt(),
             'composition' => $composition,
             'moon_classification' => $this->determineMoonClassification($composition),
-            // The rigs the simulation ran with, so the page can explain the
-            // figures and the belt window rather than just assert them.
-            'rig' => [
-                'source' => $rigs['source'],
-                'efficiency_bonus' => round($rigs['yield_bonus'], 2),
-                'decay_bonus' => round($rigs['decay_bonus'], 2),
-                'stability_bonus' => round($rigs['stability_bonus'], 2),
-                'yield_multiplier' => round($rigs['yield_multiplier'], 4),
-                'belt_lifetime_hours' => $rigs['lifetime_hours'],
-                'auto_fracture_minutes' => $rigs['auto_fracture_minutes'],
-            ],
+            'rig' => $rig,
+        ];
+    }
+
+    /**
+     * What a refinery and its moon rigs do for one chunk.
+     *
+     * @param array{hull?: int, tiers?: array<string, int>} $fit
+     * @return array{hull: int, tiers: array<string, int>, names: string[], yield_bonus: float, timer_tier: int, mining_window_hours: int, unstable_hours: int, auto_fracture_minutes: float}
+     */
+    public function simulatedRig(array $fit): array
+    {
+        $tiers = $fit['tiers'] ?? [];
+        $tier = fn (string $kind) => max(0, min(2, (int) ($tiers[$kind] ?? 0)));
+
+        if ((int) ($fit['hull'] ?? 0) === RefineryService::TATARA) {
+            $hull = RefineryService::TATARA;
+            $chosen = [MoonDrillingRigs::PROFICIENCY => $tier(MoonDrillingRigs::PROFICIENCY)];
+            $timerTier = $yieldTier = $chosen[MoonDrillingRigs::PROFICIENCY];
+        } else {
+            $hull = RefineryService::ATHANOR;
+            $chosen = [
+                MoonDrillingRigs::EFFICIENCY => $tier(MoonDrillingRigs::EFFICIENCY),
+                MoonDrillingRigs::STABILITY => $tier(MoonDrillingRigs::STABILITY),
+            ];
+            $timerTier = $chosen[MoonDrillingRigs::STABILITY];
+            $yieldTier = $chosen[MoonDrillingRigs::EFFICIENCY];
+        }
+
+        $names = [];
+        foreach ($chosen as $kind => $kindTier) {
+            if ($kindTier > 0) {
+                $names[] = MoonDrillingRigs::RIGS[MoonDrillingRigs::typeFor($kind, $kindTier)]['name'];
+            }
+        }
+
+        return [
+            'hull' => $hull,
+            'tiers' => $chosen,
+            'names' => $names,
+            'yield_bonus' => MoonDrillingRigs::YIELD_BONUS[$yieldTier],
+            'timer_tier' => $timerTier,
+            'mining_window_hours' => MoonDrillingRigs::readyHours($timerTier),
+            'unstable_hours' => MoonDrillingRigs::UNSTABLE_HOURS,
+            'auto_fracture_minutes' => MoonDrillingRigs::autoFractureMinutes($timerTier),
         ];
     }
 

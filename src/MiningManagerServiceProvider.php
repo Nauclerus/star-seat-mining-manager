@@ -4,6 +4,7 @@ namespace MiningManager;
 
 use Seat\Services\AbstractSeatPlugin;
 use MiningManager\Console\Commands\ProcessMiningLedgerCommand;
+use MiningManager\Console\Commands\ReconcilePersonalMiningCommand;
 use MiningManager\Console\Commands\BackfillOreTypeFlagsCommand;
 use MiningManager\Console\Commands\CalculateMonthlyTaxesCommand;
 use MiningManager\Console\Commands\CalculateMonthlyStatisticsCommand;
@@ -25,7 +26,7 @@ use MiningManager\Console\Commands\InitializeCommand;
 use MiningManager\Console\Commands\CachePriceDataCommand;
 use MiningManager\Console\Commands\DiagnosePricesCommand;
 use MiningManager\Console\Commands\DiagnoseAffiliationCommand;
-use MiningManager\Console\Commands\ResolveGuestAffiliationsCommand;
+use MiningManager\Console\Commands\ResolveCharactersCommand;
 use MiningManager\Console\Commands\DiagnoseCharacterCommand;
 use MiningManager\Console\Commands\DiagnoseMoonExtractionsCommand;
 use MiningManager\Console\Commands\DiagnoseTypeIdsCommand;
@@ -133,6 +134,7 @@ class MiningManagerServiceProvider extends AbstractSeatPlugin
         if ($this->app->runningInConsole()) {
             $this->commands([
                 ProcessMiningLedgerCommand::class,
+                ReconcilePersonalMiningCommand::class,
                 BackfillOreTypeFlagsCommand::class,
                 CalculateMonthlyTaxesCommand::class,
                 CalculateMonthlyStatisticsCommand::class,
@@ -151,7 +153,7 @@ class MiningManagerServiceProvider extends AbstractSeatPlugin
                 CachePriceDataCommand::class,
                 DiagnosePricesCommand::class,
                 DiagnoseAffiliationCommand::class,
-                ResolveGuestAffiliationsCommand::class,
+                ResolveCharactersCommand::class,
                 DiagnoseCharacterCommand::class,
                 DiagnoseMoonExtractionsCommand::class,
                 DiagnoseTypeIdsCommand::class,
@@ -215,6 +217,12 @@ class MiningManagerServiceProvider extends AbstractSeatPlugin
         // context, within a request.
         $this->app->singleton(
             \MiningManager\Services\Tax\PaymentAllocationService::class
+        );
+
+        // Shared so the in-progress notice on a page sees the characters the
+        // controllers asked for while building it.
+        $this->app->singleton(
+            \MiningManager\Services\Character\AffiliationResolutionService::class
         );
 
         $this->app->singleton(
@@ -675,9 +683,8 @@ class MiningManagerServiceProvider extends AbstractSeatPlugin
             // silently switch to 'sell'.
             try {
                 if (class_exists(\ManagerCore\Services\PluginBridge::class)) {
-                    // MC's vocabulary is sell|buy|avg; MM's is
-                    // sell|buy|average. Map before seeding so MC doesn't
-                    // get an unrecognised 'average'.
+                    // MC uses sell|buy|avg; MM surfaces sell|buy|average, so map
+                    // before seeding or MC gets a value it does not recognise.
                     $priceType = ($pricingSettings['price_type'] ?? 'sell') === 'average'
                         ? 'avg'
                         : ($pricingSettings['price_type'] ?? 'sell');

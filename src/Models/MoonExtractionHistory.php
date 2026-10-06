@@ -3,6 +3,7 @@
 namespace MiningManager\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use MiningManager\Models\Concerns\ChunkLifecycle;
 
 /**
  * MoonExtractionHistory Model
@@ -35,6 +36,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class MoonExtractionHistory extends Model
 {
+    use ChunkLifecycle;
 
     /**
      * The table associated with the model.
@@ -70,8 +72,7 @@ class MoonExtractionHistory extends Model
         'auto_fractured',
         'fractured_at',
         'fractured_by',
-        'chunk_lifetime_hours',
-        'auto_fracture_delay_minutes',
+        'moon_rigs',
         'notes',
     ];
 
@@ -96,8 +97,7 @@ class MoonExtractionHistory extends Model
         'estimated_value_at_arrival' => 'integer',
         'final_estimated_value' => 'integer',
         'actual_mined_value' => 'integer',
-        'chunk_lifetime_hours' => 'integer',
-        'auto_fracture_delay_minutes' => 'integer',
+        'moon_rigs' => 'array',
     ];
 
     /**
