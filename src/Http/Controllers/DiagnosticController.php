@@ -1021,6 +1021,16 @@ class DiagnosticController extends Controller
             $endTime = microtime(true);
             $duration = round(($endTime - $startTime) * 1000, 2); // milliseconds
 
+            // A provider that failed outright still hands back the cached
+            // prices, which would read here as a passing test.
+            if ($this->priceService->lastFetchStoodIn()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => $this->priceService->standInNotice(),
+                    'provider' => $provider,
+                ]);
+            }
+
             // Get type names
             $typeNames = DB::table('invTypes')
                 ->whereIn('typeID', $testTypeIds)
@@ -1099,6 +1109,7 @@ class DiagnosticController extends Controller
                     'janice_market' => $pricingSettings['janice_market'] ?? 'jita',
                     'janice_price_method' => $pricingSettings['janice_price_method'] ?? 'buy',
                     'price_type' => $pricingSettings['price_type'] ?? 'sell',
+                    'fallback_provider' => $this->describeFallbackSetting($pricingSettings['fallback_provider'] ?? 'fuzzwork'),
                     'cache_duration' => ($pricingSettings['cache_duration'] ?? 240) . ' minutes',
                     'use_refined_value' => ($pricingSettings['use_refined_value'] ?? false) ? 'Yes' : 'No',
                     'refining_efficiency' => ($pricingSettings['refining_efficiency'] ?? 87.5) . '%',
@@ -1114,6 +1125,21 @@ class DiagnosticController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * The fallback provider as Diagnostics shows it, with why it cannot stand
+     * in when it cannot.
+     */
+    protected function describeFallbackSetting(string $choice): string
+    {
+        if ($choice === PriceProviderService::FALLBACK_NONE) {
+            return 'None: cached prices are kept when the provider fails';
+        }
+
+        $whyNot = $this->priceService->unavailableAsFallback($choice);
+
+        return (PriceProviderService::PROVIDER_LABELS[$choice] ?? $choice) . ($whyNot !== null ? " (not available: {$whyNot})" : '');
     }
 
     /**
@@ -1203,6 +1229,14 @@ class DiagnosticController extends Controller
 
             $endTime = microtime(true);
             $duration = round(($endTime - $startTime) * 1000, 2);
+
+            if ($this->priceService->lastFetchStoodIn()) {
+                return response()->json([
+                    'success' => false,
+                    'error' => $this->priceService->standInNotice(),
+                    'provider' => $provider,
+                ]);
+            }
 
             // Get type names
             $typeNames = DB::table('invTypes')
@@ -1344,10 +1378,24 @@ class DiagnosticController extends Controller
         }
 
         if ($health['provider_failing']) {
+            $fallback = $health['provider']['fallback'] ?? null;
             $recommendations[] = [
                 'severity' => 'warning',
-                'message' => 'Price refreshes are failing. Cached prices stay as they are until they work again.',
+                'message' => $fallback && !empty($health['provider']['fallback_ok'])
+                    ? 'Price refreshes from the price provider are failing. Prices come from ' . (PriceProviderService::PROVIDER_LABELS[$fallback] ?? $fallback) . ' until it answers again.'
+                    : 'Price refreshes are failing. Cached prices stay as they are until they work again.',
                 'action' => 'Check the price provider settings under Settings, Pricing'
+            ];
+        }
+
+        // SeAT's prices are CCP's averages, which can be far from what
+        // anything sells for. Said rather than changed for the operator.
+        $configured = $this->settingsService->getPricingSettings()['price_provider'] ?? 'seat';
+        if (!in_array($configured, [PriceProviderService::PROVIDER_FUZZWORK, PriceProviderService::PROVIDER_JANICE, PriceProviderService::PROVIDER_MANAGER_CORE], true)) {
+            $recommendations[] = [
+                'severity' => 'warning',
+                'message' => "The price provider is SeAT Database: CCP's average prices across New Eden, not what ore and materials sell for at a trade hub, so values priced from them can be well off.",
+                'action' => 'Pick a market provider such as Fuzzwork, free and with no key needed, under Settings, Pricing'
             ];
         }
 
@@ -1429,6 +1477,15 @@ class DiagnosticController extends Controller
             // Fetch prices
             $prices = $this->priceService->getPrices($typeIds);
 
+            // A provider that failed outright hands back its fallback's prices
+            // and, for what that cannot price, the cached ones. Writing the
+            // cached ones back would only make stale prices look fresh, so
+            // they are left out, as the scheduled refresh does.
+            $standIn = $this->priceService->lastFetchStoodIn();
+            if ($standIn) {
+                $prices = array_diff_key($prices, array_flip($this->priceService->lastKeptTypeIds()));
+            }
+
             // Store in cache using correct price_type column
             $stored = 0;
             $failed = 0;
@@ -1471,6 +1528,14 @@ class DiagnosticController extends Controller
             }
 
             $duration = round((microtime(true) - $startTime) * 1000, 2);
+
+            if ($standIn) {
+                return response()->json([
+                    'success' => false,
+                    'error' => $this->priceService->standInNotice() . " {$stored} price(s) written.",
+                    'provider' => $provider,
+                ]);
+            }
 
             return response()->json([
                 'success' => true,
@@ -3851,9 +3916,12 @@ class DiagnosticController extends Controller
             'event_started' => $ns->sendEventStarted($this->buildFakeMiningEvent($data), []),
             'event_completed' => $ns->sendEventCompleted($this->buildFakeMiningEvent($data), []),
             'price_provider' => $ns->sendPriceProviderStatus(array_merge([
-                'provider' => 'janice',
+                'provider' => 'Janice',
                 'failing' => true,
                 'error' => 'Janice refused the request with HTTP 429 (too many requests)',
+                'advice' => 'Check the provider on the Diagnostics page, under Price Provider, or pick another one under Settings, Pricing.',
+                'fallback' => 'Fuzzwork, Jita buy',
+                'fallback_ok' => true,
                 'since' => now()->subHours(4)->format('Y-m-d H:i'),
                 'last_success' => now()->subHours(8)->format('Y-m-d H:i'),
             ], $data)),

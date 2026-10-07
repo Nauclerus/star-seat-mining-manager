@@ -862,6 +862,7 @@ class SettingsController extends Controller
             'price_type' => 'required|in:sell,buy,average',
             'cache_duration' => 'required|integer|min:1|max:1440',
             'fallback_to_jita' => 'nullable|boolean',
+            'fallback_provider' => 'nullable|in:none,fuzzwork,janice,manager-core',
             
             // Janice-specific settings
             'janice_api_key' => 'nullable|string|max:255',
@@ -978,14 +979,18 @@ class SettingsController extends Controller
             // last remaining reader was switched to MC's getPreferenceForPlugin
             // bridge call in commit d61e9e9. The forward-only migration
             // 000018 cleans up the legacy rows on existing installs.
-            $this->settingsService->updatePricingSettings([
+            $pricing = [
                 'price_type' => $data['price_type'],
                 'cache_duration' => $data['cache_duration'],
                 'fallback_to_jita' => $request->has('fallback_to_jita'),
                 // Refining settings
                 'use_refined_value' => $request->has('use_refined_value'),
                 'refining_efficiency' => $data['refining_efficiency'],
-            ]);
+            ];
+            if (isset($data['fallback_provider'])) {
+                $pricing['fallback_provider'] = $data['fallback_provider'];
+            }
+            $this->settingsService->updatePricingSettings($pricing);
 
             // Clear all settings + price caches
             $this->clearSettingsCache();
@@ -1422,6 +1427,7 @@ class SettingsController extends Controller
             $data['notify_moon_scan_missing'] = $request->boolean('notify_moon_scan_missing');
             $data['notify_extraction_at_risk'] = $request->boolean('notify_extraction_at_risk');
             $data['notify_extraction_lost'] = $request->boolean('notify_extraction_lost');
+            $data['notify_metenox_cargo_full'] = $request->boolean('notify_metenox_cargo_full');
             $data['notify_event_created'] = $request->boolean('notify_event_created');
             $data['notify_event_started'] = $request->boolean('notify_event_started');
             $data['notify_event_completed'] = $request->boolean('notify_event_completed');
@@ -1500,6 +1506,7 @@ class SettingsController extends Controller
             $data['notify_moon_scan_missing'] = $request->boolean('notify_moon_scan_missing');
             $data['notify_extraction_at_risk'] = $request->boolean('notify_extraction_at_risk');
             $data['notify_extraction_lost'] = $request->boolean('notify_extraction_lost');
+            $data['notify_metenox_cargo_full'] = $request->boolean('notify_metenox_cargo_full');
             $data['notify_event_created'] = $request->boolean('notify_event_created');
             $data['notify_event_started'] = $request->boolean('notify_event_started');
             $data['notify_event_completed'] = $request->boolean('notify_event_completed');
@@ -1683,6 +1690,7 @@ class SettingsController extends Controller
             'notify_moon_scan_missing' => 'nullable|boolean',
             'notify_extraction_at_risk' => ['nullable', 'boolean', $crossPluginRule],
             'notify_extraction_lost' => ['nullable', 'boolean', $crossPluginRule],
+            'notify_metenox_cargo_full' => 'nullable|boolean',
             'notify_event_created' => 'nullable|boolean',
             'notify_event_started' => 'nullable|boolean',
             'notify_event_completed' => 'nullable|boolean',
